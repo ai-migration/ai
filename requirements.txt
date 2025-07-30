@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+langchain 
+langgraph 
+typing 
+typing_extensions 
+langchain_openai 
+langchain_core 
+langchain-community
+confluent-kafka
+python-dotenv
+openai
+faiss-cpu
+tiktoken
+pandas
+numpy
+tqdm
