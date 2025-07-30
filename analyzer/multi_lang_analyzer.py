@@ -32,4 +32,5 @@ results = analyzer.analyze("extracted_files/controller.py", "python")
 for func in results:
     print(f"🔍 {func['name']} → 역할: {func['role']}")
 
+
 """

@@ -39,7 +39,7 @@ class FileExtractor:
         return result
 
 
-# 사용 예시
+# 사용 예시 
 """
 
 # test_extract.py
