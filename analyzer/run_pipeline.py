@@ -1,93 +1,119 @@
 import os
+import zipfile
 import json
-from analyzer.file_extractor import FileExtractor
-from analyzer.multi_lang_analyzer import MultiLangAnalyzer
-from analyzer.structure_mapper import StructureMapper
-from analyzer.class_analyzer import ClassAnalyzer
+import shutil
+from .java_analyzer import JavaAnalyzer
+from .python_analyzer import PythonAnalyzer
+from .structure_mapper import StructureMapper
+from .xml_mapper_analyzer import XmlMapperAnalyzer
 
-def run_pipeline(zip_path: str):
-    zip_file = os.path.basename(zip_path)
-    extractor = FileExtractor(zip_path)
-    extract_dir = extractor.extract_zip()
-    code_files = extractor.find_supported_code_files()
+def run_pipeline(zip_file_path: str):
+    extract_dir = "extracted_files"
+    base_zip_name = os.path.basename(zip_file_path)
 
-    structure_mapper = StructureMapper()
+    print(f"--- 0단계: 소스 코드 준비 ---")
+    if os.path.exists(extract_dir):
+        shutil.rmtree(extract_dir)
+    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_dir)
+    print(f"'{zip_file_path}' 압축 해제 완료.\n")
 
-    functions_output = []
-    classes_output = []
-    class_info_map = {} # 클래스 정보를 경로 기준으로 저장할 딕셔너리
+    source_files = []
+    for root, _, files in os.walk(extract_dir):
+        for file in files:
+            if file.endswith((".java", ".py", ".xml")):
+                source_files.append(os.path.join(root, file))
 
-    print("--- 1단계: 클래스 구조 분석 ---")
-    for path, lang in code_files:
-        if lang == "java":
-            rel_path = os.path.relpath(path, extract_dir).replace("\\", "/")
-            try:
-                class_analyzer = ClassAnalyzer(path)
-                class_info = class_analyzer.analyze()
-                if class_info:
-                    class_info["language"] = lang
-                    class_info["zip_file"] = zip_file
-                    class_info["rel_path"] = rel_path
-                    classes_output.append(class_info)
-                    class_info_map[rel_path] = class_info # 맵에 저장
-            except Exception as e:
-                print(f"클래스 분석 오류 {path}: {e}")
+    print(f"--- 1단계: XML 매퍼 분석 ---")
+    query_bank = {}
+    xml_files = [f for f in source_files if f.endswith(".xml") and 'src/main/resources' in f]
+    for xml_file in xml_files:
+        analyzer = XmlMapperAnalyzer(xml_file)
+        queries = analyzer.get_queries()
+        query_bank.update(queries)
+    print(f"→ 총 {len(query_bank)}개 SQL 쿼리를 쿼리 뱅크에 로드했습니다.\n")
 
-    print("\n--- 2단계: 함수 분석 및 역할 추론 ---")
-    for path, lang in code_files:
-        rel_path = os.path.relpath(path, extract_dir).replace("\\", "/")
-        extracted_path = path.replace("\\", "/")
+    print(f"--- 2단계: 소스 코드 정보 추출 ---")
+    all_classes = []
+    all_functions = []
+    source_code_files = [f for f in source_files if f.endswith((".java", ".py"))]
+    for file_path in source_code_files:
+        lang = "java" if file_path.endswith(".java") else "python"
+        rel_path = os.path.relpath(file_path, extract_dir)
+        source_info = {"zip_file": base_zip_name, "rel_path": rel_path, "language": lang}
+        analyzer = JavaAnalyzer(file_path, query_bank=query_bank) if lang == "java" else PythonAnalyzer(file_path)
 
-        # 이 파일에 해당하는 클래스 정보를 맵에서 가져옴
-        class_info = class_info_map.get(rel_path)
-
-        # 언어에 맞는 분석기 선택
-        analyzer = None
-        if lang == 'python':
-            from analyzer.python_analyzer import PythonAnalyzer
-            analyzer = PythonAnalyzer(path)
-        elif lang == 'java':
-            from analyzer.java_analyzer import JavaAnalyzer
-            analyzer = JavaAnalyzer(path)
-
-        if not analyzer:
+        if not analyzer.is_parsed:
             continue
 
+        # python_analyzer로부터 상속 정보를 받기 위해 classes 정보에 bases 추가
+        classes = analyzer.extract_classes()
+        for class_info in classes:
+            class_info["source_info"] = source_info
+            all_classes.append(class_info)
+
         functions = analyzer.extract_functions()
+        for func_info in functions:
+            func_info["source_info"] = source_info
+            all_functions.append(func_info)
 
-        print(f"분석 파일: {path} / {lang}")
-        print(f"→ 클래스: {class_info['name'] if class_info else 'N/A'} / 추출 함수 수: {len(functions)}")
+    print(f"→ 총 {len(all_classes)}개 클래스, {len(all_functions)}개 함수 정보 추출 완료.\n")
 
-        for func in functions:
-            # 클래스 정보를 함께 전달하여 역할 추론
-            func['role'] = structure_mapper.infer_role(func, class_info)
-            func["language"] = lang
-            func["zip_file"] = zip_file
-            func["extracted_path"] = extracted_path
-            func["rel_path"] = rel_path
+    print(f"--- 3단계: 아키텍처 역할 추론 ---")
+    mapper = StructureMapper()
 
-            # 필요한 필드만 선택하여 저장
-            fields = [
-                "name", "class", "role", "calls", "annotations", "body", "full_body",
-                "is_async", "zip_file", "extracted_path", "rel_path",
-                "line_range", "language"
-            ]
-            filtered_func = {k: func[k] for k in fields if k in func}
-            functions_output.append(filtered_func)
+    class_role_map = {}
+    for class_info in all_classes:
+        class_functions = [f for f in all_functions if f.get("class") == class_info.get("name") and f.get("source_info", {}).get("rel_path") == class_info.get("source_info", {}).get("rel_path")]
+        class_info_with_functions = {**class_info, "functions": class_functions}
 
-    # --- 결과 저장 ---
-    with open("functions.jsonl", "w", encoding="utf-8") as f:
-        for item in functions_output:
+        role_info = mapper.infer_class_role(class_info_with_functions)
+        class_info['role'] = role_info
+        class_role_map[class_info['name']] = role_info['type']
+        print(f"클래스 '{class_info['name']}'의 역할 추론 → {role_info['type']}")
+
+    # *** 주요 수정 사항: 독립 함수의 역할 추론 로직 변경 ***
+    for func_info in all_functions:
+        parent_class_name = func_info.get("class")
+        # 함수가 클래스에 속한 경우
+        if parent_class_name and parent_class_name in class_role_map:
+            parent_role = class_role_map[parent_class_name]
+            func_role_type = f"{parent_role}_METHOD"
+            if func_info['name'] in ['__init__', parent_class_name]:
+                func_role_type = "CONSTRUCTOR"
+
+            func_info['role'] = {
+                "type": func_role_type,
+                "confidence": 1.0,
+                "evidence": [f"Inferred from parent class role: {parent_role}"]
+            }
+        # 함수가 클래스에 속하지 않은 독립 함수인 경우
+        else:
+             role_info = mapper.infer_standalone_function_role(func_info)
+             func_info['role'] = role_info
+             print(f"독립 함수 '{func_info['name']}'의 역할 추론 → {role_info['type']}")
+
+    print("\n--- 4단계: 최종 결과 저장 ---")
+    output_functions_file = "functions.jsonl"
+    output_classes_file = "classes.jsonl"
+
+    with open(output_classes_file, "w", encoding="utf-8") as f:
+        for item in all_classes:
+            item.pop('functions', None)
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    with open("classes.jsonl", "w", encoding="utf-8") as f:
-        for item in classes_output:
+    with open(output_functions_file, "w", encoding="utf-8") as f:
+        for item in all_functions:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-    print("\n분석 완료!")
-    print(f"→ functions.jsonl 에 {len(functions_output)}개 함수 저장됨")
-    print(f"→ classes.jsonl 에 {len(classes_output)}개 클래스 저장됨")
+    print(f"분석 완료.")
+    print(f"→ {output_classes_file} 에 {len(all_classes)}개 클래스 정보 저장됨")
+    print(f"→ {output_functions_file} 에 {len(all_functions)}개 함수 정보 저장됨")
+
 
 if __name__ == "__main__":
-    # 사용 예시: 분석할 zip 파일 경로를 여기에 입력하세요.
-    run_pipeline("samples/SpringBoot_Basic-main.zip")
+    sample_zip = "samples/flask-realworld-example-app-master.zip"
+    if not os.path.exists(sample_zip):
+        print(f"오류: 샘플 파일 '{sample_zip}'을 찾을 수 없습니다.")
+    else:
+        run_pipeline(sample_zip)

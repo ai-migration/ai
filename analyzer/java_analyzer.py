@@ -1,113 +1,146 @@
-import re
+import javalang
 
 class JavaAnalyzer:
-    def __init__(self, file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            self.lines = f.readlines()
-        self.code = "".join(self.lines)
+    """
+    Java 소스 파일을 분석하여 클래스, 함수, 어노테이션, '메서드 호출' 등의 구조를 추출합니다.
+    XML 매퍼에서 추출된 쿼리 뱅크를 활용하여 SQL을 매핑합니다.
+    """
+    def __init__(self, file_path: str, query_bank: dict = None):
+        self.file_path = file_path
+        self.query_bank = query_bank or {}
+        self.tree = None
+        self.is_parsed = False
 
-    def extract_class_name(self):
-        match = re.search(r'(public\s+)?class\s+(\w+)', self.code)
-        return match.group(2) if match else None
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                self.code = f.read()
+                self.lines = self.code.splitlines()
+            self.tree = javalang.parse.parse(self.code)
+            self.is_parsed = True
+        except Exception as e:
+            print(f"⚠️ [Java Parse Warning] Failed to parse file: {self.file_path}\n    Reason: {e}")
+
+    def extract_classes(self):
+        if not self.is_parsed: return []
+        classes = []
+        for _, node in self.tree.filter(javalang.tree.TypeDeclaration):
+            if isinstance(node, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
+                classes.append({
+                    "name": node.name,
+                    "type": type(node).__name__,
+                    "annotations": [ann.name for ann in node.annotations],
+                    "body": self.code,
+                })
+        return classes
 
     def extract_functions(self):
+        if not self.is_parsed: return []
         functions = []
-        class_name = self.extract_class_name()
-        if not class_name:
-            return []
+        for _, class_node in self.tree.filter(javalang.tree.TypeDeclaration):
+            if not isinstance(class_node, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)): continue
 
-        i = 0
-        while i < len(self.lines):
-            line = self.lines[i].strip()
+            nodes_to_process = class_node.methods + class_node.constructors
+            for node in nodes_to_process:
+                start_pos = node.position
+                end_pos = self._find_last_position(node)
 
-            if line.startswith("@") or re.match(r'(public|private|protected)', line):
-                sig_lines = []
-                annotations = [] # 어노테이션 저장 리스트
-                sig_start = i
+                sql_query = None
+                dao_name_convention = class_node.name[0].lower() + class_node.name[1:]
+                query_id_convention = f"{dao_name_convention}.{node.name}"
+                if query_id_convention in self.query_bank:
+                    sql_query = self.query_bank[query_id_convention]
 
-                temp_i = i
-                body_started = False
-                while temp_i < len(self.lines):
-                    current_line_stripped = self.lines[temp_i].strip()
-                    if current_line_stripped.startswith("@"):
-                        annotations.append(current_line_stripped)
-
-                    sig_lines.append(self.lines[temp_i].rstrip())
-                    if "{" in current_line_stripped:
-                        body_started = True
-                        temp_i += 1
-                        break
-                    temp_i += 1
-
-                if not body_started:
-                    i += 1
-                    continue
-
-                method_name = self._extract_method_or_constructor_name(sig_lines, class_name)
-                if not method_name:
-                    i +=1
-                    continue
-
-                body_lines = []
-                full_sig_text = "".join(sig_lines)
-                brace_count = full_sig_text.count("{") - full_sig_text.count("}")
-
-                i = temp_i
-                while i < len(self.lines):
-                    line_content = self.lines[i]
-                    body_lines.append(line_content.rstrip())
-                    brace_count += line_content.count("{")
-                    brace_count -= line_content.count("}")
-                    i += 1
-                    if brace_count == 0:
-                        break
-
-                full_body = "\n".join(sig_lines + body_lines)
-                body = self._extract_core_body(sig_lines + body_lines)
-
-                start_line = sig_start + 1
-                end_line = i
+                if not sql_query:
+                    for ann in node.annotations:
+                        if ann.name == 'Query':
+                            if isinstance(ann.element, javalang.tree.Literal):
+                                sql_query = ann.element.value.strip('"').strip()
+                            elif isinstance(ann.element, list):
+                                for pair in ann.element:
+                                    if pair.name == 'value':
+                                        sql_query = pair.value.value.strip('"').strip()
+                                        break
 
                 functions.append({
-                    "name": method_name,
-                    "class": class_name,
-                    "calls": self.extract_calls(full_body),
-                    "body": body,
-                    "full_body": full_body,
-                    "annotations": annotations, # 수집된 어노테이션 추가
-                    "is_async": False,
-                    "line_range": f"L{start_line}-L{end_line}"
+                    "name": class_node.name if isinstance(node, javalang.tree.ConstructorDeclaration) else node.name,
+                    "class": class_node.name,
+                    "calls": self.extract_calls(node),
+                    "sql_query": sql_query,
+                    "body": self._get_node_text_from_position(node.body.position, self._find_last_position(node.body)) if node.body and isinstance(node.body, javalang.tree.Node) else "",
+                    "full_body": self._get_node_text_from_position(start_pos, end_pos),
+                    "annotations": [ann.name for ann in node.annotations],
+                    "line_range": f"L{start_pos.line}-L{end_pos.line}" if start_pos and end_pos else "L?-L?"
                 })
-            else:
-                i += 1
         return functions
 
-    def _extract_method_or_constructor_name(self, sig_lines, class_name):
-        full_sig = " ".join(line.strip() for line in sig_lines)
-        method_pattern = r'\b(public|private|protected)\b\s+(static\s+)?[\w<>\[\],\s?]+\s+(\w+)\s*\('
-        constructor_pattern = rf'\b(public|private|protected)\b\s+({class_name})\s*\('
+    def extract_calls(self, method_node):
+        """
+        메서드 노드 내부의 다른 메서드 호출(MethodInvocation)을 추출하는 수정된 메서드.
+        """
+        calls = []
+        # 메서드 body가 없거나 list가 아니면 빈 리스트 반환
+        if not hasattr(method_node, 'body') or not isinstance(method_node.body, list):
+            return []
 
-        method_match = re.search(method_pattern, full_sig)
-        if method_match:
-            return method_match.group(3)
+        # 메서드 body는 statement의 '리스트'이므로, 각 statement를 순회해야 함
+        for statement in method_node.body:
+            if not statement:
+                continue
 
-        constructor_match = re.search(constructor_pattern, full_sig)
-        if constructor_match:
-            return constructor_match.group(2)
+            # 각 statement 노드 안에서 MethodInvocation을 필터링
+            try:
+                for _, call_node in statement.filter(javalang.tree.MethodInvocation):
+                    target_parts = []
+                    current = call_node
 
-        return None
+                    # 호출 경로를 재귀적으로 탐색하여 전체 경로 생성
+                    while hasattr(current, 'member'):
+                        target_parts.append(current.member)
+                        if hasattr(current, 'qualifier') and current.qualifier:
+                            current = current.qualifier
+                        else:
+                            break
 
-    def _extract_core_body(self, all_lines):
-        body = []
-        in_body = False
-        for line in all_lines:
-            if "{" in line:
-                in_body = True
+                    if isinstance(current, str):
+                        target_parts.append(current)
 
-            stripped = line.strip()
-            if in_body and stripped and not stripped.startswith('{') and not stripped.startswith('}'):
-                body.append(stripped)
-        return "\n".join(body).strip('}')
+                    if not target_parts:
+                        continue
 
-    def extract_calls(self, code):
-        return sorted(set(re.findall(r'(\w+)\.', code)))
+                    target = ".".join(reversed(target_parts))
+
+                    call_type = "internal"
+                    if any(ext in target.lower() for ext in ["java.", "org.springframework.", "javax.", "jakarta."]):
+                        call_type = "external_sdk"
+                    calls.append({"target": target, "type": call_type})
+            except (AttributeError, TypeError):
+                # filter를 지원하지 않는 노드 타입이 있을 수 있으므로 예외 처리
+                continue
+        return calls
+
+    def _get_node_text_from_position(self, start_pos, end_pos):
+        if not start_pos or not end_pos: return ""
+        start_line, start_col = start_pos.line - 1, start_pos.column - 1
+        end_line, end_col = end_pos.line - 1, end_pos.column
+        if start_line >= len(self.lines) or end_line >= len(self.lines): return ""
+        if start_line == end_line: return self.lines[start_line][start_col:end_col]
+        lines = [self.lines[start_line][start_col:]]
+        lines.extend(self.lines[start_line + 1:end_line])
+        lines.append(self.lines[end_line][:end_col])
+        return "\n".join(lines)
+
+    def _find_last_position(self, node):
+        last_pos = node.position if hasattr(node, 'position') and node.position else None
+        if hasattr(node, 'children'):
+            for child in node.children:
+                child_pos = None
+                items_to_check = []
+                if isinstance(child, javalang.tree.Node): items_to_check.append(child)
+                elif isinstance(child, list): items_to_check.extend(item for item in child if isinstance(item, javalang.tree.Node))
+                for item in items_to_check:
+                    item_pos = self._find_last_position(item)
+                    if item_pos and (child_pos is None or item_pos.line > child_pos.line or (item_pos.line == child_pos.line and item_pos.column > child_pos.column)):
+                        child_pos = item_pos
+                if child_pos and (last_pos is None or (child_pos.line > last_pos.line or (child_pos.line == last_pos.line and child_pos.column > last_pos.column))):
+                    last_pos = child_pos
+        return last_pos
