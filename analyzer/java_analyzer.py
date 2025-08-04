@@ -1,4 +1,6 @@
+# java_analyzer.py
 import javalang
+import re
 
 class JavaAnalyzer:
     """
@@ -10,6 +12,7 @@ class JavaAnalyzer:
         self.query_bank = query_bank or {}
         self.tree = None
         self.is_parsed = False
+        self.raw_code_lines = []
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -20,36 +23,52 @@ class JavaAnalyzer:
         except Exception as e:
             print(f"⚠️ [Java Parse Warning] Failed to parse file: {self.file_path}\n    Reason: {e}")
 
+    def _extract_javadoc_description(self, node):
+        if not node.position:
+            return ""
+        doc_comment_block = "\n".join(self.lines[:node.position.line - 1])
+        javadoc_match = re.search(r'/\*\*(.*?)\*/', doc_comment_block, re.DOTALL | re.MULTILINE)
+        if not javadoc_match:
+            return ""
+        javadoc_content = javadoc_match.group(1)
+        p_tag_match = re.search(r'<p>(.*?)</p>', javadoc_content, re.DOTALL | re.IGNORECASE)
+        if p_tag_match:
+            description = ' '.join([line.strip().lstrip('*').strip() for line in p_tag_match.group(1).strip().split('\n')])
+            return description
+        lines = [line.strip().lstrip('*').strip() for line in javadoc_content.split('\n')]
+        first_meaningful_line = next((line for line in lines if line and not line.startswith('@')), None)
+        return first_meaningful_line if first_meaningful_line else ""
+
     def extract_classes(self):
         if not self.is_parsed: return []
         classes = []
         for _, node in self.tree.filter(javalang.tree.TypeDeclaration):
             if isinstance(node, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
+                description = self._extract_javadoc_description(node)
                 classes.append({
                     "name": node.name,
                     "type": type(node).__name__,
+                    "description": description,
                     "annotations": [ann.name for ann in node.annotations],
                     "body": self.code,
                 })
         return classes
 
+    # 다른 메서드들은 변경 없이 그대로 유지됩니다.
     def extract_functions(self):
         if not self.is_parsed: return []
         functions = []
         for _, class_node in self.tree.filter(javalang.tree.TypeDeclaration):
             if not isinstance(class_node, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)): continue
-
             nodes_to_process = class_node.methods + class_node.constructors
             for node in nodes_to_process:
                 start_pos = node.position
                 end_pos = self._find_last_position(node)
-
                 sql_query = None
                 dao_name_convention = class_node.name[0].lower() + class_node.name[1:]
                 query_id_convention = f"{dao_name_convention}.{node.name}"
                 if query_id_convention in self.query_bank:
                     sql_query = self.query_bank[query_id_convention]
-
                 if not sql_query:
                     for ann in node.annotations:
                         if ann.name == 'Query':
@@ -60,7 +79,6 @@ class JavaAnalyzer:
                                     if pair.name == 'value':
                                         sql_query = pair.value.value.strip('"').strip()
                                         break
-
                 functions.append({
                     "name": class_node.name if isinstance(node, javalang.tree.ConstructorDeclaration) else node.name,
                     "class": class_node.name,
@@ -72,52 +90,28 @@ class JavaAnalyzer:
                     "line_range": f"L{start_pos.line}-L{end_pos.line}" if start_pos and end_pos else "L?-L?"
                 })
         return functions
-
     def extract_calls(self, method_node):
-        """
-        메서드 노드 내부의 다른 메서드 호출(MethodInvocation)을 추출하는 수정된 메서드.
-        """
         calls = []
-        # 메서드 body가 없거나 list가 아니면 빈 리스트 반환
-        if not hasattr(method_node, 'body') or not isinstance(method_node.body, list):
-            return []
-
-        # 메서드 body는 statement의 '리스트'이므로, 각 statement를 순회해야 함
+        if not hasattr(method_node, 'body') or not isinstance(method_node.body, list): return []
         for statement in method_node.body:
-            if not statement:
-                continue
-
-            # 각 statement 노드 안에서 MethodInvocation을 필터링
+            if not statement: continue
             try:
                 for _, call_node in statement.filter(javalang.tree.MethodInvocation):
                     target_parts = []
                     current = call_node
-
-                    # 호출 경로를 재귀적으로 탐색하여 전체 경로 생성
                     while hasattr(current, 'member'):
                         target_parts.append(current.member)
                         if hasattr(current, 'qualifier') and current.qualifier:
                             current = current.qualifier
-                        else:
-                            break
-
-                    if isinstance(current, str):
-                        target_parts.append(current)
-
-                    if not target_parts:
-                        continue
-
+                        else: break
+                    if isinstance(current, str): target_parts.append(current)
+                    if not target_parts: continue
                     target = ".".join(reversed(target_parts))
-
                     call_type = "internal"
-                    if any(ext in target.lower() for ext in ["java.", "org.springframework.", "javax.", "jakarta."]):
-                        call_type = "external_sdk"
+                    if any(ext in target.lower() for ext in ["java.", "org.springframework.", "javax.", "jakarta."]): call_type = "external_sdk"
                     calls.append({"target": target, "type": call_type})
-            except (AttributeError, TypeError):
-                # filter를 지원하지 않는 노드 타입이 있을 수 있으므로 예외 처리
-                continue
+            except (AttributeError, TypeError): continue
         return calls
-
     def _get_node_text_from_position(self, start_pos, end_pos):
         if not start_pos or not end_pos: return ""
         start_line, start_col = start_pos.line - 1, start_pos.column - 1
@@ -128,7 +122,6 @@ class JavaAnalyzer:
         lines.extend(self.lines[start_line + 1:end_line])
         lines.append(self.lines[end_line][:end_col])
         return "\n".join(lines)
-
     def _find_last_position(self, node):
         last_pos = node.position if hasattr(node, 'position') and node.position else None
         if hasattr(node, 'children'):

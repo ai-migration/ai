@@ -44,17 +44,18 @@ class PythonAnalyzer:
         return functions
 
     def _extract_function_info(self, node, class_name=None):
-        # *** 주요 수정 사항: 데코레이터 추출 로직 강화 ***
         decorators_list = []
         for decorator in node.decorator_list:
             if isinstance(decorator, ast.Name):
                 decorators_list.append(f"@{decorator.id}")
-            # @blueprint.route 같은 형태 (ast.Attribute) 처리
             elif isinstance(decorator, ast.Attribute) and hasattr(decorator, 'value') and hasattr(decorator.value, 'id'):
                 decorators_list.append(f"@{decorator.value.id}.{decorator.attr}")
-            # @jwt_required() 같은 호출 형태 (ast.Call) 처리
-            elif isinstance(decorator, ast.Call) and hasattr(decorator, 'func') and hasattr(decorator.func, 'id'):
-                 decorators_list.append(f"@{decorator.func.id}")
+            elif isinstance(decorator, ast.Call):
+                func = decorator.func
+                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                    decorators_list.append(f"@{func.value.id}.{func.attr}")
+                elif isinstance(func, ast.Name):
+                    decorators_list.append(f"@{func.id}")
 
         return {
             "name": node.name,
