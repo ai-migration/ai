@@ -115,7 +115,7 @@ serviceimpl_prompt = PromptTemplate(
 if __name__ == '__main__':
     from langchain_openai import ChatOpenAI
     
-    llm = ChatOpenAI(model="gpt-4o-mini", api_key='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')
+    llm = ChatOpenAI(model="gpt-4o-mini", api_key='')
     
     chain = controller_template | llm
 
