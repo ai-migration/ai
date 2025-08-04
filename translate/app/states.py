@@ -5,9 +5,12 @@ class State(TypedDict):
     framework: str
     egov_version: str
 
-class CoversionState(TypedDict):
+class CoversionEgovState(TypedDict):
+    input_path: dict
     vo: str
     service: str
     service_impl: str
     controller: str
+    validate: str
+    retrieved: dict
 
