@@ -2,172 +2,182 @@ import os
 import json
 import shutil
 import zipfile
+import re
+
+
+from dataclasses import dataclass, asdict
+
 from .java_analyzer import JavaAnalyzer
 from .python_analyzer import PythonAnalyzer
 from .structure_mapper import StructureMapper
 from .xml_mapper_analyzer import XmlMapperAnalyzer
+from .file_extractor import FileExtractor
 
-def run_pipeline(zip_file_path: str):
+@dataclass
+class Document:
+    page_content: str
+    metadata: dict
+
+def run_pipeline(zip_file_path: str, output_dir: str = "output"):
     """
-    소스 코드를 분석하여 아키텍처 정보를 추출하고,
-    코드의 언어 구성에 따라 다른 형식의 JSON 파일을 생성합니다.
+    모듈화된 코드 분석 파이프라인 (Python/Java 처리 분기 개선)
     """
-    extract_dir = "extracted_files"
     base_zip_name = os.path.basename(zip_file_path)
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    print(f"--- 0단계: 소스 코드 준비 ---")
-    if os.path.exists(extract_dir):
-        shutil.rmtree(extract_dir)
-    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        zip_ref.extractall(extract_dir)
-    print(f"'{zip_file_path}' 압축 해제 완료.\n")
+    # --- 1단계: 파일 추출 ---
+    print("--- 1단계: 소스 코드 파일 추출 ---")
+    file_extractor = FileExtractor(zip_file_path)
+    extract_dir = file_extractor.extract_zip()
+    all_files = file_extractor.find_supported_code_files()
+    print(f"'{zip_file_path}'에서 총 {len(all_files)}개의 지원 파일을 찾았습니다.\n")
 
-    source_files = []
-    for root, _, files in os.walk(extract_dir):
-        for file in files:
-            if file.endswith((".java", ".py", ".xml")):
-                source_files.append(os.path.join(root, file))
+    detected_langs = {lang for _, lang in all_files if lang in ['java', 'python']}
 
-    # 프로젝트에 포함된 프로그래밍 언어 감지
-    detected_langs = {
-        "java" if f.endswith(".java") else "python"
-        for f in source_files if f.endswith((".java", ".py"))
-    }
-
-    print(f"--- 1단계: XML 매퍼 분석 ---")
+    # --- 2단계: XML 매퍼 분석 (Java 프로젝트에만 해당) ---
     query_bank = {}
-    xml_files = [f for f in source_files if f.endswith(".xml") and 'src/main/resources' in f]
-    if xml_files:
+    if 'java' in detected_langs:
+        print("--- 2단계: XML 매퍼 분석 ---")
+        xml_files = [path for path, lang in all_files if lang == 'xml' and 'src/main/resources' in path]
         for xml_file in xml_files:
             analyzer = XmlMapperAnalyzer(xml_file)
-            queries = analyzer.get_queries()
-            query_bank.update(queries)
-        print(f"→ 총 {len(query_bank)}개 SQL 쿼리를 쿼리 뱅크에 로드했습니다.\n")
-    else:
-        print("→ 분석할 XML 매퍼 파일이 없습니다.\n")
+            query_bank.update(analyzer.get_queries())
+        print(f"→ 총 {len(query_bank)}개의 SQL 쿼리를 쿼리 뱅크에 로드했습니다.\n")
 
-
-    print(f"--- 2단계: 소스 코드 정보 추출 ---")
+    # --- 3단계: 소스 코드 정보 추출 ---
+    print("--- 3단계: 소스 코드 정보 추출 ---")
     all_classes = []
     all_functions = []
-    source_code_files = [f for f in source_files if f.endswith((".java", ".py"))]
-    for file_path in source_code_files:
-        lang = "java" if file_path.endswith(".java") else "python"
+    source_code_files = [(path, lang) for path, lang in all_files if lang in ['java', 'python']]
+
+    for file_path, lang in source_code_files:
         rel_path = os.path.relpath(file_path, extract_dir)
         source_info = {"zip_file": base_zip_name, "rel_path": rel_path, "language": lang}
-        analyzer = JavaAnalyzer(file_path, query_bank=query_bank) if lang == "java" else PythonAnalyzer(file_path)
 
-        if not analyzer.is_parsed:
-            continue
+        analyzer = None
+        if lang == 'java':
+            analyzer = JavaAnalyzer(file_path, query_bank=query_bank)
+        elif lang == 'python':
+            analyzer = PythonAnalyzer(file_path)
+
+        if not analyzer or not analyzer.is_parsed: continue
 
         classes = analyzer.extract_classes()
         for class_info in classes:
             class_info["source_info"] = source_info
             all_classes.append(class_info)
 
-        functions = analyzer.extract_functions()
-        for func_info in functions:
-            func_info["source_info"] = source_info
-            all_functions.append(func_info)
-
-    if not all_classes and not all_functions:
-        print("→ 분석 가능한 소스 코드가 없습니다.")
-        return
+        # Python 파일의 경우에만 함수 정보 추출
+        if lang == 'python':
+            functions = analyzer.extract_functions()
+            for func_info in functions:
+                func_info["source_info"] = source_info
+                all_functions.append(func_info)
 
     print(f"→ 총 {len(all_classes)}개 클래스, {len(all_functions)}개 함수 정보 추출 완료.\n")
 
-    print(f"--- 3단계: 아키텍처 역할 추론 ---")
+    # --- 4단계: 아키텍처 역할 추론 ---
+    print("--- 4단계: 아키텍처 역할 추론 ---")
     mapper = StructureMapper()
-
-    class_role_map = {}
     for class_info in all_classes:
-        class_functions = [f for f in all_functions if f.get("class") == class_info.get("name") and f.get("source_info", {}).get("rel_path") == class_info.get("source_info", {}).get("rel_path")]
-        class_info_with_functions = {**class_info, "functions": class_functions}
+        # Python 클래스의 경우, 해당 클래스에 속한 함수 정보를 함께 전달
+        py_class_functions = []
+        if class_info.get("source_info", {}).get("language") == 'python':
+            py_class_functions = [f for f in all_functions if f.get("class") == class_info.get("name")]
 
+        class_info_with_functions = {**class_info, "functions": py_class_functions}
         role_info = mapper.infer_class_role(class_info_with_functions)
         class_info['role'] = role_info
-        class_role_map[class_info['name']] = role_info['type']
         print(f"클래스 '{class_info['name']}'의 역할 추론 → {role_info['type']}")
 
+    # Python 독립 함수의 역할 추론
     for func_info in all_functions:
-        parent_class_name = func_info.get("class")
-        if parent_class_name and parent_class_name in class_role_map:
-            parent_role = class_role_map[parent_class_name]
-            func_role_type = f"{parent_role}_METHOD"
-            if func_info['name'] in ['__init__', parent_class_name]:
-                func_role_type = "CONSTRUCTOR"
-            func_info['role'] = {"type": func_role_type, "confidence": 1.0, "evidence": [f"Inferred from parent class role: {parent_role}"]}
-        elif not parent_class_name: # 독립 함수인 경우
-             role_info = mapper.infer_standalone_function_role(func_info)
-             func_info['role'] = role_info
-             print(f"독립 함수 '{func_info['name']}'의 역할 추론 → {role_info['type']}")
+        if not func_info.get("class"): # 클래스에 속하지 않은 함수
+            role_info = mapper.infer_standalone_function_role(func_info)
+            func_info['role'] = role_info
+            print(f"독립 함수 '{func_info['name']}'의 역할 추론 → {role_info['type']}")
+    print("")
 
-    print("\n--- 4단계: 최종 결과 저장 ---")
+    # --- 5단계: 최종 결과 저장 ---
+    print("--- 5단계: 최종 결과 저장 ---")
 
-    # Python 코드가 하나라도 있으면 기존 .jsonl 형식으로 저장
+    # Python 코드가 있을 경우 classes.jsonl, functions.jsonl 생성
     if 'python' in detected_langs:
-        output_functions_file = "functions.jsonl"
-        output_classes_file = "classes.jsonl"
+        output_classes_file = os.path.join(output_dir, "classes.jsonl")
+        output_functions_file = os.path.join(output_dir, "functions.jsonl")
 
+        # Python 클래스 정보만 필터링하여 저장
+        python_classes = [c for c in all_classes if c.get("source_info", {}).get("language") == 'python']
         with open(output_classes_file, "w", encoding="utf-8") as f:
-            for item in all_classes:
-                item.pop('functions', None)
+            for item in python_classes:
+                item.pop('functions', None) # 역할 추론에 사용된 함수 정보는 최종 파일에서 제외
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
+        # Python 함수 정보 저장
         with open(output_functions_file, "w", encoding="utf-8") as f:
             for item in all_functions:
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
-        print(f"분석 완료: Python 코드 또는 혼합 프로젝트")
-        print(f"→ {output_classes_file} 에 {len(all_classes)}개 클래스 정보 저장됨")
+        print(f"분석 완료: Python 프로젝트")
+        print(f"→ {output_classes_file} 에 {len(python_classes)}개 클래스 정보 저장됨")
         print(f"→ {output_functions_file} 에 {len(all_functions)}개 함수 정보 저장됨")
 
-    # Java 코드만 있을 경우, 요청된 단일 JSON 형식으로 저장
-    elif 'java' in detected_langs:
-        java_output_data = []
+    # Java 코드만 있을 경우 기존 로직 수행
+    elif 'java' in detected_langs and 'python' not in detected_langs:
+        grouped_documents = {}
+        java_classes = [c for c in all_classes if c.get("source_info", {}).get("language") == 'java']
 
-        # 클래스들을 파일 경로 기준으로 그룹화
-        classes_by_file = {}
-        for class_info in all_classes:
+        for class_info in java_classes:
             rel_path = class_info['source_info']['rel_path']
-            if rel_path not in classes_by_file:
-                classes_by_file[rel_path] = []
-            classes_by_file[rel_path].append(class_info)
+            class_name = class_info.get("name", "")
 
-        for rel_path, classes_in_file in classes_by_file.items():
-            if not classes_in_file:
-                continue
+            domain = "unknown"
+            norm_path = rel_path.replace('\\', '/')
+            base_dir = ""
+            if "src/main/java/" in norm_path: base_dir = "src/main/java/"
+            elif "src/test/java/" in norm_path: base_dir = "src/test/java/"
 
-            # 파일의 대표 클래스는 첫 번째 클래스로 가정
-            representative_class = classes_in_file[0]
+            if base_dir:
+                package_path = norm_path.split(base_dir)[1]
+                package_as_path = os.path.dirname(package_path)
+                domain = package_as_path.replace('/', '.')
 
-            # JavaAnalyzer에서 저장한 원본 코드를 가져옴
-            full_code = representative_class.get('body', '')
-            # 요청 형식에 맞게 개행 문자 제거
-            cleaned_code = full_code.replace('\r', '').replace('\n', '')
+            feature = "unknown"
+            match = re.search(r'^(.*?)(Controller|Service|ServiceImpl|Repository|DAO|VO|Dto|Entity|Config|Exception|Util|Filter|Jwt|Impl|Tests|Test)$', class_name, re.IGNORECASE)
+            if match:
+                feature_candidate = match.group(1)
+                feature_candidate = re.sub(r'^(Res|Req)', '', feature_candidate, flags=re.IGNORECASE)
+                feature = feature_candidate.lower() if feature_candidate else class_name.lower()
+            else:
+                feature = class_name.lower()
 
-            # 파일의 역할은 대표 클래스의 역할을 따르고 소문자로 변환
-            role_type = representative_class.get('role', {}).get('type', 'component').lower()
+            if class_name.endswith("Application"):
+                feature = "app"
 
-            file_output = {
-                "name": os.path.basename(rel_path),
-                "role": role_type,
-                "code": cleaned_code,
-                "is_async": False,
-                "java_path": "",
-                "language": "java"
-            }
-            java_output_data.append(file_output)
+            doc = Document(
+                page_content=f"[description] {class_info.get('description', '')}\n[code]{class_info.get('body', '')}",
+                metadata={
+                    "title": class_name,
+                    "path": rel_path,
+                    "type": class_info.get('role', {}).get('type', 'component').upper(),
+                    "domain": domain,
+                    "feature": feature
+                }
+            )
 
-        output_file_name = "analysis_results.json"
+            role_key = doc.metadata['type'].lower()
+            if role_key not in grouped_documents:
+                grouped_documents[role_key] = []
+
+            grouped_documents[role_key].append(asdict(doc))
+
+        output_file_name = os.path.join(output_dir, "analysis_results.json")
         with open(output_file_name, "w", encoding="utf-8") as f:
-            json.dump(java_output_data, f, ensure_ascii=False, indent=4)
+            json.dump(grouped_documents, f, ensure_ascii=False, indent=4)
 
-        print(f"분석 완료: Java 전용 프로젝트")
-        print(f"→ {output_file_name} 에 {len(java_output_data)}개 자바 파일 정보 저장됨")
+        print(f"분석 완료: 그룹화된 결과를 '{output_file_name}'에 저장했습니다.")
 
-    else:
-        print("분석할 Java 또는 Python 소스 파일이 없습니다.")
 
 
 if __name__ == "__main__":

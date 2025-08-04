@@ -2,14 +2,14 @@ import re
 
 class StructureMapper:
     ROLE_CONTROLLER = "CONTROLLER"
+    ROLE_SERVICE = "SERVICE"
     ROLE_SERVICE_IMPL = "SERVICE_IMPL"
     ROLE_DAO = "DAO"
     ROLE_DTO = "DTO"
     ROLE_ENTITY = "ENTITY"
     ROLE_CONFIG = "CONFIGURATION"
     ROLE_UTIL = "UTIL"
-    ROLE_DEFAULT = "COMPONENT"
-    # 함수 역할을 위한 상수 추가
+    ROLE_DEFAULT = "UTIL"
     ROLE_CONTROLLER_METHOD = "CONTROLLER_METHOD"
 
     def infer_class_role(self, class_info: dict) -> dict:
@@ -20,11 +20,9 @@ class StructureMapper:
             return self._infer_java_class_role(class_info)
         return self._get_default_role("Unsupported language")
 
-    # *** 주요 수정 사항: 새로운 메서드 추가 ***
     def infer_standalone_function_role(self, func_info: dict) -> dict:
         """클래스에 속하지 않은 독립 함수의 역할을 추론합니다."""
         decorators = func_info.get("decorators", [])
-        # 라우팅 데코레이터가 있으면 컨트롤러 메서드로 판단
         controller_decorators = ["@blueprint.route", "@app.route"]
         if any(marker in deco for deco in decorators for marker in controller_decorators):
             return {
@@ -42,18 +40,14 @@ class StructureMapper:
         body = (class_info.get("body") or "").lower()
         functions = class_info.get("functions", [])
 
-        # Entity 단서 (SQLAlchemy Model 상속) - 우선순위 높게
         if "model" in bases:
             scores[self.ROLE_ENTITY] += 0.9
             evidence[self.ROLE_ENTITY].append("Inherits from 'Model', indicating it's an SQLAlchemy Entity.")
-
-        # DTO 단서 (Marshmallow Schema 상속) - 우선순위 높게
         if "schema" in bases:
             scores[self.ROLE_DTO] += 0.9
             evidence[self.ROLE_DTO].append("Inherits from 'Schema', indicating it's a Marshmallow DTO/Serializer.")
 
-        # 나머지 휴리스틱 규칙 적용
-        controller_decorators = ["@app.route", "@router.get", "@blueprint.route"]
+        controller_decorators = ["@app.route", "@router.get", "@router.post", "@router.put", "@router.delete", "@blueprint.route", "@api.get", "@api.route"]
         for func in functions:
             if any(deco in str(func.get("decorators",[])) for deco in controller_decorators):
                 scores[self.ROLE_CONTROLLER] += 0.9
@@ -86,6 +80,8 @@ class StructureMapper:
         raw_annotations = class_info.get("annotations", [])
         annotations = [ann.lower() for ann in raw_annotations]
         name = (class_info.get("name") or "").lower()
+
+        # 어노테이션 기반 추론 (우선순위 높음)
         if "restcontroller" in annotations or "controller" in annotations:
             return {"type": self.ROLE_CONTROLLER, "confidence": 1.0, "evidence": ["@RestController or @Controller annotation found."]}
         elif "service" in annotations:
@@ -98,10 +94,19 @@ class StructureMapper:
             return {"type": self.ROLE_CONFIG, "confidence": 1.0, "evidence": ["@Configuration annotation found."]}
         elif "component" in annotations:
              return {"type": self.ROLE_UTIL, "confidence": 0.9, "evidence": ["@Component annotation found."]}
+
+        # 이름 기반 추론
         elif name.endswith("controller"):
             return {"type": self.ROLE_CONTROLLER, "confidence": 0.8, "evidence": ["Class name ends with 'Controller'."]}
-        elif name.endswith("serviceimpl") or name.endswith("service"):
-            return {"type": self.ROLE_SERVICE_IMPL, "confidence": 0.8, "evidence": ["Class name ends with 'ServiceImpl' or 'Service'."]}
+
+        # --- 2. 로직 분리 ---
+        # ServiceImpl을 먼저 확인해야 Service에 걸리지 않음
+        elif name.endswith("serviceimpl"):
+            return {"type": self.ROLE_SERVICE_IMPL, "confidence": 0.8, "evidence": ["Class name ends with 'ServiceImpl'."]}
+        elif name.endswith("service"):
+            return {"type": self.ROLE_SERVICE, "confidence": 0.8, "evidence": ["Class name ends with 'Service'."]}
+        # --------------------
+
         elif name.endswith("repository") or name.endswith("dao"):
             return {"type": self.ROLE_DAO, "confidence": 0.8, "evidence": ["Class name ends with 'Repository' or 'DAO'."]}
         elif name.endswith(("dto", "vo", "form", "response")):
