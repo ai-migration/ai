@@ -19,6 +19,10 @@ class PythonAnalyzer:
         classes = []
         for node in ast.walk(self.tree):
             if isinstance(node, ast.ClassDef):
+                # [수정] 내부 설정용 Meta 클래스는 분석에서 제외
+                if node.name == "Meta":
+                    continue
+
                 classes.append({
                     "name": node.name,
                     "type": "ClassDef",
@@ -38,6 +42,7 @@ class PythonAnalyzer:
 
         for class_node in ast.walk(self.tree):
             if isinstance(class_node, ast.ClassDef):
+                if class_node.name == "Meta": continue # Meta 클래스 내부 함수도 스킵
                 for node in class_node.body:
                     if isinstance(node, ast.FunctionDef):
                         functions.append(self._extract_function_info(node, class_name=class_node.name))
