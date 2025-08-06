@@ -7,10 +7,19 @@ class State(TypedDict):
 
 class CoversionEgovState(TypedDict):
     input_path: dict
-    vo: str
-    service: str
-    service_impl: str
-    controller: str
+    controller: list
+    controller_egov: list
+    controller_report: dict
+    service: list
+    service_egov: list
+    service_report: dict
+    serviceimpl: list
+    serviceimpl_egov: list
+    serviceimpl_report: dict
+    vo: list
+    vo_egov: list
+    vo_report: dict
+    retrieved: list
     validate: str
-    retrieved: dict
-
+    next_role: str
+    next_step: str
