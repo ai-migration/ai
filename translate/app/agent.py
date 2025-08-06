@@ -6,6 +6,10 @@ from langgraph.prebuilt import ToolNode
 import os
 from conversion_egov import ConversionEgovAgent
 
+from nodes.analyze import analyze_python, analyze_java
+from nodes.detect import detect_language, select_lang
+from nodes.preprocess import preprocessing
+
 LLM = 'gpt-4o-mini'
 
 class ConversionAgent:
