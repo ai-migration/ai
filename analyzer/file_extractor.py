@@ -1,4 +1,5 @@
 import zipfile, os
+import shutil
 from typing import List, Tuple
 
 SUPPORTED_LANGUAGES = {
@@ -18,8 +19,11 @@ class FileExtractor:
         self.extract_dir = extract_dir
 
     def extract_zip(self) -> str:
-        if not os.path.exists(self.extract_dir):
-            os.makedirs(self.extract_dir)
+
+        if os.path.exists(self.extract_dir):
+            shutil.rmtree(self.extract_dir)
+            print(f"기존 폴더 '{self.extract_dir}'를 삭제했습니다.")
+        os.makedirs(self.extract_dir)
         with zipfile.ZipFile(self.zip_path, "r") as zip_ref:
             zip_ref.extractall(self.extract_dir)
         return self.extract_dir

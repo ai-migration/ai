@@ -15,3 +15,4 @@ tiktoken
 pandas
 numpy
 tqdm
+javalang
