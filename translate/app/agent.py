@@ -1,14 +1,14 @@
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from producer import MessageProducer
-from states import State
+from translate.app.states import State
 from langgraph.prebuilt import ToolNode
 import os
 from conversion_egov import ConversionEgovAgent
 
-from nodes.analyze import analyze_python, analyze_java
-from nodes.detect import detect_language, select_lang
-from nodes.preprocess import preprocessing
+from translate.app.nodes.analyze import analyze_python, analyze_java
+from translate.app.nodes.detect import detect_language, select_lang
+from translate.app.nodes.preprocess import preprocessing
 
 LLM = 'gpt-4o-mini'
 
