@@ -15,3 +15,13 @@ tiktoken
 pandas
 numpy
 tqdm
+streamlit
+unstructured
+unstructured_inference
+chromadb
+pdf2image
+pillow
+pdfminer.six
+pi_heif
+pdfplumber
+pymupdf
