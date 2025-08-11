@@ -167,6 +167,8 @@ with col1:
             for pg in pages:
                 with st.expander(f"관련 페이지: {pg+1}"):
                     st.image(st.session_state.page_images[pg], use_container_width=True)
+                    
+                    
 
 
 
