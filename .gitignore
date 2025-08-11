@@ -1,3 +1,5 @@
 __pycache__
 log
 .streamlit/secrets.toml
+chatbot_real/uploaded_egov.pdf
+chatbot_real/egov_chroma_db/
