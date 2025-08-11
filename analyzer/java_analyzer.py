@@ -1,6 +1,9 @@
 # java_analyzer.py
 import javalang
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 class JavaAnalyzer:
     """
@@ -12,7 +15,6 @@ class JavaAnalyzer:
         self.query_bank = query_bank or {}
         self.tree = None
         self.is_parsed = False
-        self.raw_code_lines = []
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -21,11 +23,13 @@ class JavaAnalyzer:
             self.tree = javalang.parse.parse(self.code)
             self.is_parsed = True
         except Exception as e:
-            print(f"⚠️ [Java Parse Warning] Failed to parse file: {self.file_path}\n    Reason: {e}")
+            logger.warning(f"[Java Parse Warning] {self.file_path} :: {e}")
+            self.lines = []
 
     def _extract_javadoc_description(self, node):
-        if not node.position:
+        if not getattr(node, "position", None):
             return ""
+        # node.position 이전의 블록에서 마지막 /** ... */를 찾는다
         doc_comment_block = "\n".join(self.lines[:node.position.line - 1])
         javadoc_match = re.search(r'/\*\*(.*?)\*/', doc_comment_block, re.DOTALL | re.MULTILINE)
         if not javadoc_match:
@@ -37,7 +41,7 @@ class JavaAnalyzer:
             return description
         lines = [line.strip().lstrip('*').strip() for line in javadoc_content.split('\n')]
         first_meaningful_line = next((line for line in lines if line and not line.startswith('@')), None)
-        return first_meaningful_line if first_meaningful_line else ""
+        return first_meaningful_line or ""
 
     def extract_classes(self):
         if not self.is_parsed: return []
@@ -49,71 +53,78 @@ class JavaAnalyzer:
                     "name": node.name,
                     "type": type(node).__name__,
                     "description": description,
-                    "annotations": [ann.name for ann in node.annotations],
+                    "annotations": [ann.name for ann in getattr(node, "annotations", [])],
                     "body": self.code,
                 })
         return classes
 
-    # 다른 메서드들은 변경 없이 그대로 유지됩니다.
     def extract_functions(self):
         if not self.is_parsed: return []
         functions = []
         for _, class_node in self.tree.filter(javalang.tree.TypeDeclaration):
-            if not isinstance(class_node, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)): continue
-            nodes_to_process = class_node.methods + class_node.constructors
+            if not isinstance(class_node, (javalang.tree.ClassDeclaration, javalang.tree.InterfaceDeclaration)):
+                continue
+            nodes_to_process = list(getattr(class_node, "methods", [])) + list(getattr(class_node, "constructors", []))
             for node in nodes_to_process:
-                start_pos = node.position
+                start_pos = getattr(node, "position", None)
                 end_pos = self._find_last_position(node)
+
+                # SQL 매핑 (XML or @Query)
                 sql_query = None
                 dao_name_convention = class_node.name[0].lower() + class_node.name[1:]
                 query_id_convention = f"{dao_name_convention}.{node.name}"
                 if query_id_convention in self.query_bank:
                     sql_query = self.query_bank[query_id_convention]
                 if not sql_query:
-                    for ann in node.annotations:
-                        if ann.name == 'Query':
-                            if isinstance(ann.element, javalang.tree.Literal):
-                                sql_query = ann.element.value.strip('"').strip()
-                            elif isinstance(ann.element, list):
+                    for ann in getattr(node, "annotations", []):
+                        if ann.name == "Query":
+                            if hasattr(ann, "element") and hasattr(ann.element, "value"):
+                                sql_query = getattr(ann.element, "value", "").strip('"').strip()
+                            elif isinstance(getattr(ann, "element", None), list):
                                 for pair in ann.element:
-                                    if pair.name == 'value':
+                                    if getattr(pair, "name", "") == "value" and hasattr(pair.value, "value"):
                                         sql_query = pair.value.value.strip('"').strip()
                                         break
+
                 functions.append({
                     "name": class_node.name if isinstance(node, javalang.tree.ConstructorDeclaration) else node.name,
                     "class": class_node.name,
                     "calls": self.extract_calls(node),
                     "sql_query": sql_query,
-                    "body": self._get_node_text_from_position(node.body.position, self._find_last_position(node.body)) if node.body and isinstance(node.body, javalang.tree.Node) else "",
+                    "body": self._get_node_text_from_position(getattr(node.body, "position", None),
+                                                              self._find_last_position(getattr(node, "body", None)))
+                              if getattr(node, "body", None) and isinstance(node.body, javalang.tree.Node) else "",
                     "full_body": self._get_node_text_from_position(start_pos, end_pos),
-                    "annotations": [ann.name for ann in node.annotations],
+                    "annotations": [ann.name for ann in getattr(node, "annotations", [])],
                     "line_range": f"L{start_pos.line}-L{end_pos.line}" if start_pos and end_pos else "L?-L?"
                 })
         return functions
+
     def extract_calls(self, method_node):
+        """
+        메서드 전체 서브트리를 순회하여 호출을 수집.
+        target 형식 예: "System.out.println", "restTemplate.getForObject"
+        """
         calls = []
-        if not hasattr(method_node, 'body') or not isinstance(method_node.body, list): return []
-        for statement in method_node.body:
-            if not statement: continue
-            try:
-                for _, call_node in statement.filter(javalang.tree.MethodInvocation):
-                    target_parts = []
-                    current = call_node
-                    while hasattr(current, 'member'):
-                        target_parts.append(current.member)
-                        if hasattr(current, 'qualifier') and current.qualifier:
-                            current = current.qualifier
-                        else: break
-                    if isinstance(current, str): target_parts.append(current)
-                    if not target_parts: continue
-                    target = ".".join(reversed(target_parts))
-                    call_type = "internal"
-                    if any(ext in target.lower() for ext in ["java.", "org.springframework.", "javax.", "jakarta."]): call_type = "external_sdk"
-                    calls.append({"target": target, "type": call_type})
-            except (AttributeError, TypeError): continue
+        try:
+            for _, call in method_node.filter(javalang.tree.MethodInvocation):
+                # qualifier는 문자열(예: "System.out" / "this" / "service")일 수 있음
+                qualifier = getattr(call, "qualifier", None)
+                member = getattr(call, "member", None)
+                if not member:
+                    continue
+                target = f"{qualifier}.{member}" if qualifier else member
+                call_type = "internal"
+                # 매우 보수적인 외부 SDK 힌트 (패키지명까지는 알기 어려우므로 한정)
+                if qualifier and any(q in qualifier for q in ["System.", "java.", "javax.", "jakarta.", "org.springframework.", "com.fasterxml."]):
+                    call_type = "external_sdk"
+                calls.append({"target": target, "type": call_type})
+        except Exception as e:
+            logger.debug(f"[extract_calls] skip due to: {e}")
         return calls
+
     def _get_node_text_from_position(self, start_pos, end_pos):
-        if not start_pos or not end_pos: return ""
+        if not start_pos or not end_pos or not getattr(self, "lines", None): return ""
         start_line, start_col = start_pos.line - 1, start_pos.column - 1
         end_line, end_col = end_pos.line - 1, end_pos.column
         if start_line >= len(self.lines) or end_line >= len(self.lines): return ""
@@ -122,18 +133,20 @@ class JavaAnalyzer:
         lines.extend(self.lines[start_line + 1:end_line])
         lines.append(self.lines[end_line][:end_col])
         return "\n".join(lines)
+
     def _find_last_position(self, node):
-        last_pos = node.position if hasattr(node, 'position') and node.position else None
-        if hasattr(node, 'children'):
+        if not getattr(node, "position", None):
+            return None
+        last = node.position
+        if hasattr(node, "children"):
             for child in node.children:
-                child_pos = None
-                items_to_check = []
-                if isinstance(child, javalang.tree.Node): items_to_check.append(child)
-                elif isinstance(child, list): items_to_check.extend(item for item in child if isinstance(item, javalang.tree.Node))
-                for item in items_to_check:
-                    item_pos = self._find_last_position(item)
-                    if item_pos and (child_pos is None or item_pos.line > child_pos.line or (item_pos.line == child_pos.line and item_pos.column > child_pos.column)):
-                        child_pos = item_pos
-                if child_pos and (last_pos is None or (child_pos.line > last_pos.line or (child_pos.line == last_pos.line and child_pos.column > last_pos.column))):
-                    last_pos = child_pos
-        return last_pos
+                items = []
+                if isinstance(child, javalang.tree.Node):
+                    items.append(child)
+                elif isinstance(child, list):
+                    items.extend([x for x in child if isinstance(x, javalang.tree.Node)])
+                for item in items:
+                    pos = self._find_last_position(item)
+                    if pos and (pos.line > last.line or (pos.line == last.line and pos.column > last.column)):
+                        last = pos
+        return last

@@ -1,31 +1,40 @@
+from typing import List, Optional, Tuple
+from typing_extensions import Annotated
 from typing import TypedDict
+import operator
 
-class State(TypedDict):
-    language: str          # 'python' 또는 'java'
-    framework: str
-    egov_version: str
-    input_path: str        # Zip 파일 경로 (preprocessing에서 설정)
-    extract_dir: str       # Zip 해제 경로 (preprocessing에서 설정)
-    code_files: list       # [(파일절대경로, 언어)] 리스트
-    classes: list          # Python 또는 Java 클래스 정보
-    functions: list        # Python 함수 정보
-    java_analysis: list    # Java 기능(feature)별 역할 매핑 결과
+class State(TypedDict, total=False):
+    # 파이프라인 공통 상태
+    language: Optional[str]          # 'python' | 'java'
+    framework: Optional[str]
+    egov_version: Optional[str]
+    input_path: str                  # Zip 파일 경로 (preprocessing에서 설정)
+    extract_dir: str                 # Zip 해제 경로 (preprocessing에서 설정)
 
-class CoversionEgovState(TypedDict):
+    # 수집 결과
+    code_files: Annotated[List[Tuple[str, str]], operator.add]  # [(abs_path, lang)]
+    classes:    Annotated[List[dict], operator.add]             # 분석된 클래스들
+    functions:  Annotated[List[dict], operator.add]             # 분석된 함수들
+
+    # 요약/부가
+    java_analysis: Annotated[List[dict], operator.add]          # Java feature별 매핑
+    report_files:  Annotated[List[str],  operator.add]          # 산출물 경로 누적
+
+class CoversionEgovState(TypedDict, total=False):
     input_path: dict
-    controller: list
-    controller_egov: list
+    controller: List[dict]
+    controller_egov: List[dict]
     controller_report: dict
-    service: list
-    service_egov: list
+    service: List[dict]
+    service_egov: List[dict]
     service_report: dict
-    serviceimpl: list
-    serviceimpl_egov: list
+    serviceimpl: List[dict]
+    serviceimpl_egov: List[dict]
     serviceimpl_report: dict
-    vo: list
-    vo_egov: list
+    vo: List[dict]
+    vo_egov: List[dict]
     vo_report: dict
-    retrieved: list
+    retrieved: List[dict]
     validate: str
     next_role: str
     next_step: str

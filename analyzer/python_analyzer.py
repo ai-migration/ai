@@ -1,5 +1,38 @@
 import ast
 
+def _name_from_base(node):
+    # models.Model / rest_framework.views.APIView / Generic[T] 등 폭넓게 커버
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parts = []
+        cur = node
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+        return ".".join(reversed(parts))
+    if isinstance(node, ast.Subscript):  # Generic[T] 케이스
+        return _name_from_base(node.value)
+    return None
+
+def _decorator_name(d):
+    if isinstance(d, ast.Name):
+        return d.id
+    if isinstance(d, ast.Attribute):
+        parts = []
+        cur = d
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            parts.append(cur.id)
+        return ".".join(reversed(parts))
+    if isinstance(d, ast.Call):
+        return _decorator_name(d.func)
+    return None
+
 class PythonAnalyzer:
     def __init__(self, file_path):
         self.file_path = file_path
@@ -19,15 +52,16 @@ class PythonAnalyzer:
         classes = []
         for node in ast.walk(self.tree):
             if isinstance(node, ast.ClassDef):
-                # [수정] 내부 설정용 Meta 클래스는 분석에서 제외
                 if node.name == "Meta":
                     continue
-
+                bases = [(_name_from_base(b) or "") for b in node.bases]
+                bases_tail = [b.split(".")[-1] if b else "" for b in bases]
+                decos = list(filter(None, [_decorator_name(d) for d in node.decorator_list]))
                 classes.append({
                     "name": node.name,
                     "type": "ClassDef",
-                    "bases": [b.id for b in node.bases if isinstance(b, ast.Name)],
-                    "decorators": [decorator.id for decorator in node.decorator_list if isinstance(decorator, ast.Name)],
+                    "bases": bases_tail,                  # (스키마 유지) 끝 토큰만 사용
+                    "decorators": decos,                  # 클래스 데코레이터는 '@' 없이
                     "body": ast.get_source_segment(self.code, node)
                 })
         return classes
@@ -36,58 +70,47 @@ class PythonAnalyzer:
         if not self.is_parsed: return []
         functions = []
 
+        def _collect(fn, class_name=None):
+            decos = list(filter(None, [_decorator_name(d) for d in fn.decorator_list]))
+            # 함수 데코레이터는 기존처럼 '@' 프리픽스 유지
+            decorators_list = [f"@{d}" for d in decos]
+            functions.append({
+                "name": fn.name,
+                "class": class_name,
+                "decorators": decorators_list,
+                "calls": self.extract_calls(fn),
+                "body": ast.get_source_segment(self.code, fn),
+                "line_range": f"L{fn.lineno}-L{fn.end_lineno}"
+            })
+
         for node in self.tree.body:
-            if isinstance(node, ast.FunctionDef):
-                functions.append(self._extract_function_info(node))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                _collect(node)
 
         for class_node in ast.walk(self.tree):
             if isinstance(class_node, ast.ClassDef):
-                if class_node.name == "Meta": continue # Meta 클래스 내부 함수도 스킵
+                if class_node.name == "Meta": continue
                 for node in class_node.body:
-                    if isinstance(node, ast.FunctionDef):
-                        functions.append(self._extract_function_info(node, class_name=class_node.name))
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        _collect(node, class_name=class_node.name)
         return functions
-
-    def _extract_function_info(self, node, class_name=None):
-        decorators_list = []
-        for decorator in node.decorator_list:
-            if isinstance(decorator, ast.Name):
-                decorators_list.append(f"@{decorator.id}")
-            elif isinstance(decorator, ast.Attribute) and hasattr(decorator, 'value') and hasattr(decorator.value, 'id'):
-                decorators_list.append(f"@{decorator.value.id}.{decorator.attr}")
-            elif isinstance(decorator, ast.Call):
-                func = decorator.func
-                if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                    decorators_list.append(f"@{func.value.id}.{func.attr}")
-                elif isinstance(func, ast.Name):
-                    decorators_list.append(f"@{func.id}")
-
-        return {
-            "name": node.name,
-            "class": class_name,
-            "decorators": decorators_list,
-            "calls": self.extract_calls(node),
-            "body": ast.get_source_segment(self.code, node),
-            "line_range": f"L{node.lineno}-L{node.end_lineno}"
-        }
 
     def extract_calls(self, node):
         calls = []
-        for sub_node in ast.walk(node):
-            if isinstance(sub_node, ast.Call):
-                call_name = ""
-                if isinstance(sub_node.func, ast.Name):
-                    call_name = sub_node.func.id
-                elif isinstance(sub_node.func, ast.Attribute):
-                    attr = sub_node.func
-                    path = []
-                    while isinstance(attr, ast.Attribute):
-                        path.append(attr.attr)
-                        attr = attr.value
-                    if isinstance(attr, ast.Name):
-                        path.append(attr.id)
-                    call_name = ".".join(reversed(path))
-
-                if call_name:
-                    calls.append({"target": call_name, "type": "internal"})
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Call):
+                name = ""
+                if isinstance(sub.func, ast.Name):
+                    name = sub.func.id
+                elif isinstance(sub.func, ast.Attribute):
+                    parts = []
+                    cur = sub.func
+                    while isinstance(cur, ast.Attribute):
+                        parts.append(cur.attr)
+                        cur = cur.value
+                    if isinstance(cur, ast.Name):
+                        parts.append(cur.id)
+                    name = ".".join(reversed(parts))
+                if name:
+                    calls.append({"target": name, "type": "internal"})
         return calls
