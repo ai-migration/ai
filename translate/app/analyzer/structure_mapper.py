@@ -161,7 +161,7 @@ class StructureMapper:
         highest_role = max(scores, key=scores.get)
         return {"type": highest_role, "confidence": self._normalize_score(scores[highest_role]), "evidence": evidence[highest_role]}
 
-    # ---------------------- Java (기존 유지) ----------------------
+    # ---------------------- Java ----------------------
     def _infer_java_class_role(self, class_info: dict) -> dict:
         scores = {
             self.ROLE_CONTROLLER: 0.0, self.ROLE_SERVICE: 0.0, self.ROLE_SERVICE_IMPL: 0.0,
@@ -169,49 +169,97 @@ class StructureMapper:
             self.ROLE_CONFIG: 0.0, self.ROLE_EXCEPTION: 0.0, self.ROLE_UTIL: 0.0
         }
         evidence = {role: [] for role in scores}
+
         annotations = [ann.lower() for ann in class_info.get("annotations", [])]
         name = (class_info.get("name") or "").lower()
         declaration_type = class_info.get("type", "")
+        is_interface = (declaration_type == "InterfaceDeclaration")
+        ends_service = name.endswith("service")
+        ends_serviceimpl = name.endswith("serviceimpl")
 
+        # --- Controller ---
         if "restcontroller" in annotations or "controller" in annotations:
-            scores[self.ROLE_CONTROLLER] += 1.0; evidence[self.ROLE_CONTROLLER].append("@RestController/@Controller")
+            scores[self.ROLE_CONTROLLER] += 1.0
+            evidence[self.ROLE_CONTROLLER].append("@RestController/@Controller")
+
+        # --- Service  ---
         if "service" in annotations:
-            scores[self.ROLE_SERVICE_IMPL] += 1.0; evidence[self.ROLE_SERVICE_IMPL].append("@Service")
+            if is_interface:
+                scores[self.ROLE_SERVICE] += 1.0
+                evidence[self.ROLE_SERVICE].append("@Service on interface")
+            elif ends_serviceimpl:
+                scores[self.ROLE_SERVICE_IMPL] += 1.0
+                evidence[self.ROLE_SERVICE_IMPL].append("@Service + *ServiceImpl")
+            elif ends_service:
+                scores[self.ROLE_SERVICE] += 1.0
+                evidence[self.ROLE_SERVICE].append("@Service + *Service")
+            else:
+                # conservative default for class with @Service but no name hint
+                scores[self.ROLE_SERVICE_IMPL] += 0.9
+                evidence[self.ROLE_SERVICE_IMPL].append("@Service (class)")
+
+        # --- Repository / Entity / Config / Advice / Component ---
         if "repository" in annotations:
-            scores[self.ROLE_DAO] += 1.0; evidence[self.ROLE_DAO].append("@Repository")
+            scores[self.ROLE_DAO] += 1.0
+            evidence[self.ROLE_DAO].append("@Repository")
         if "entity" in annotations:
-            scores[self.ROLE_ENTITY] += 1.0; evidence[self.ROLE_ENTITY].append("@Entity")
+            scores[self.ROLE_ENTITY] += 1.0
+            evidence[self.ROLE_ENTITY].append("@Entity")
         if "configuration" in annotations:
-            scores[self.ROLE_CONFIG] += 1.0; evidence[self.ROLE_CONFIG].append("@Configuration")
+            scores[self.ROLE_CONFIG] += 1.0
+            evidence[self.ROLE_CONFIG].append("@Configuration")
         if "controlleradvice" in annotations:
-            scores[self.ROLE_EXCEPTION] += 1.0; evidence[self.ROLE_EXCEPTION].append("@ControllerAdvice")
+            scores[self.ROLE_EXCEPTION] += 1.0
+            evidence[self.ROLE_EXCEPTION].append("@ControllerAdvice")
         if "component" in annotations:
-            scores[self.ROLE_UTIL] += 0.5; evidence[self.ROLE_UTIL].append("@Component")
+            scores[self.ROLE_UTIL] += 0.5
+            evidence[self.ROLE_UTIL].append("@Component")
 
         if name.endswith("controller"):
-            scores[self.ROLE_CONTROLLER] += 0.8; evidence[self.ROLE_CONTROLLER].append("Name ends with 'Controller'")
-        if name.endswith("serviceimpl"):
-            scores[self.ROLE_SERVICE_IMPL] += 0.8; evidence[self.ROLE_SERVICE_IMPL].append("Name ends with 'ServiceImpl'")
-        elif name.endswith("service"):
-            if declaration_type == "InterfaceDeclaration":
-                scores[self.ROLE_SERVICE] += 0.9; evidence[self.ROLE_SERVICE].append("Interface ends with 'Service'")
-            else:
-                scores[self.ROLE_SERVICE_IMPL] += 0.7; evidence[self.ROLE_SERVICE_IMPL].append("Class ends with 'Service'")
-        if name.endswith(("repository", "dao")):
-            scores[self.ROLE_DAO] += 0.8; evidence[self.ROLE_DAO].append("Ends with 'Repository'/'DAO'")
-        if name.endswith(("dto", "vo", "form", "response", "data")):
-            scores[self.ROLE_DTO] += 0.9; evidence[self.ROLE_DTO].append("Ends with DTO/VO/Form/Response/Data")
-        if name.endswith("exception"):
-            scores[self.ROLE_EXCEPTION] += 0.9; evidence[self.ROLE_EXCEPTION].append("Ends with 'Exception'")
-        if name.endswith("config"):
-            scores[self.ROLE_CONFIG] += 0.8; evidence[self.ROLE_CONFIG].append("Ends with 'Config'")
-        if name.endswith("util"):
-            scores[self.ROLE_UTIL] += 0.7; evidence[self.ROLE_UTIL].append("Ends with 'Util'")
+            scores[self.ROLE_CONTROLLER] += 0.8
+            evidence[self.ROLE_CONTROLLER].append("Name ends with 'Controller'")
 
+        if ends_serviceimpl:
+            scores[self.ROLE_SERVICE_IMPL] += 0.8
+            evidence[self.ROLE_SERVICE_IMPL].append("Name ends with 'ServiceImpl'")
+        elif ends_service:
+            if is_interface:
+                scores[self.ROLE_SERVICE] += 0.9
+                evidence[self.ROLE_SERVICE].append("Interface ends with 'Service'")
+            else:
+                scores[self.ROLE_SERVICE] += 0.7
+                evidence[self.ROLE_SERVICE].append("Class ends with 'Service'")
+
+        if name.endswith(("repository", "dao")):
+            scores[self.ROLE_DAO] += 0.8
+            evidence[self.ROLE_DAO].append("Ends with 'Repository'/'DAO'")
+
+        if name.endswith(("dto", "vo", "form", "response", "data")):
+            scores[self.ROLE_DTO] += 0.9
+            evidence[self.ROLE_DTO].append("Ends with DTO/VO/Form/Response/Data")
+
+        if name.endswith("exception"):
+            scores[self.ROLE_EXCEPTION] += 0.9
+            evidence[self.ROLE_EXCEPTION].append("Ends with 'Exception'")
+
+        if name.endswith("config"):
+            scores[self.ROLE_CONFIG] += 0.8
+            evidence[self.ROLE_CONFIG].append("Ends with 'Config'")
+
+        if name.endswith("util"):
+            scores[self.ROLE_UTIL] += 0.7
+            evidence[self.ROLE_UTIL].append("Ends with 'Util'")
+
+        # --- Fallback & pick ---
         if not any(s > 0 for s in scores.values()):
             return self._get_default_role(f"No specific patterns for Java class '{name}'.")
+
         highest_role = max(scores, key=scores.get)
-        return {"type": highest_role, "confidence": self._normalize_score(scores[highest_role]), "evidence": evidence[highest_role]}
+        return {
+            "type": highest_role,
+            "confidence": self._normalize_score(scores[highest_role]),
+            "evidence": evidence[highest_role],
+        }
 
     # ---------------------- 공통 ----------------------
     def _normalize_score(self, score: float) -> float:
