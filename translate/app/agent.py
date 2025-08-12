@@ -11,7 +11,7 @@ from translate.app.nodes.detect import detect_language, select_lang
 from translate.app.nodes.preprocess import preprocessing
 
 LLM = 'gpt-4o-mini'
-os.environ['OPENAI_API_KEY'] = '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'
+os.environ['OPENAI_API_KEY'] = ''
 
 class ConversionAgent:
     def __init__(self):
