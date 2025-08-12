@@ -5,11 +5,10 @@ import tempfile
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, START, END
 
-from translate.app.states import State
-from translate.app.nodes.preprocess import preprocessing
-from translate.app.nodes.detect import detect_language, select_lang
-from translate.app.nodes.analyze import analyze_python, analyze_java
-
+from app.states import State
+from app.nodes.preprocess import preprocessing
+from app.nodes.detect import detect_language, select_lang
+from app.nodes.analyze import analyze_python, analyze_java
 load_dotenv()
 
 # 콘솔은 요약 위주
