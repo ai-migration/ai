@@ -13,39 +13,24 @@ class State(TypedDict):
     message: str
 
 def call_agent(request):
+    print(request)
     '''
-    request: {'eventType': 'ConversionRequested', 'timestamp': 1753840526769, 'userId': 100, 'filePath': 'test', 'conversionType': 'CODE', 'inputeGovFrameVer': '3.8', 'outputeGovFrameVer': '3.10', 'isTestCode': True}
+    request: {'eventType': 'ConversionRequested', 'timestamp': 1754745245253, 'id': 4, 'userId': 1000, 'filePath': None, 'inputeGovFrameVer': '3.8', 'outputeGovFrameVer': '3.10', 'isTestCode': True, 'conversionType': 'CODE'}
     '''
     if request['eventType'] == 'ConversionRequested':
-        producer.send_message('conversion', asdict(ToTranslator(id=request['id'])))
+        producer.send_message('conversion', message=asdict(ToTranslator(id=request['id'],
+                                                                        user_id=request['userId'],
+                                                                        file_path=request['filePath'],
+                                                                        input_egov_frame_ver=request['inputeGovFrameVer'],
+                                                                        output_egov_frame_ver=request['outputeGovFrameVer'],
+                                                                        is_test_code=request['isTestCode'],
+                                                                        conversion_type=request['conversionType'])))
     elif request['agentName'] == 'SecurityRequested':
         producer.send_message('security', asdict(ToAuditor(id=request['id'])))
     elif request['agentName'] == 'ChatbotRequested':
         producer.send_message('chatbot', asdict(ToAuditor(id=request['id'])))
 
 
-
-
-
-
-
-
-######################################################################################
-def test_node(state: State):
-    print(state)
-    return {'message': '요청 완료'}
-
-# 그래프 생성
-def build_agent():
-    builder = StateGraph(State)
-
-    builder.add_node("orchestrator", test_node)
-
-    builder.add_edge(START, 'orchestrator')
-    builder.add_edge('orchestrator', END)
-
-    graph = builder.compile()
-    return graph
 
 if __name__ == '__main__':
     # graph = build_agent()
