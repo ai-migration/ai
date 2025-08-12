@@ -6,6 +6,7 @@ from langchain.vectorstores import FAISS
 from langchain_core.output_parsers import JsonOutputParser
 from prompts import controller_template, service_prompt, serviceimpl_prompt, vo_prompt
 import json
+import os
 
 LLM = 'gpt-4o-mini'
 EMBEDDING = 'text-embedding-3-small'
@@ -43,8 +44,10 @@ class ConversionEgovAgent:
         if is_completed:
             state['next_step'] = 'completed'
 
-            with open("agent_test4.json", "w", encoding='utf-8') as json_file:
-                json.dump(state, json_file, ensure_ascii=False, indent=2)
+            # with open("agent_test5.json", "w", encoding='utf-8') as json_file:
+            #     json.dump(state, json_file, ensure_ascii=False, indent=2)
+            self.producer.send_message('agent-res', message=state)
+
         else:
             state['next_step'] = 'continue'
 
@@ -178,17 +181,10 @@ class ConversionEgovAgent:
         # graph.get_graph().draw_mermaid_png(output_file_path='egov_agent.png')
         return graph
 
-    def run(self, graph):
-        graph.invoke()
-        # invoke -> produce
-
 if __name__ == '__main__':
-    state = CoversionEgovState(input_path={'controller': ['BoardController.java'],
-    # state = CoversionEgovState(input_path={'controller': [],
-                                        #    'serviceimpl': ['BoardService.java'],
-                                           'serviceimpl': [],
-                                           'vo': []},
-                                        #    'vo': ['BoardUpdateDto.java', 'BoardWriteDto.java', 'SearchData.java']},
+    state = CoversionEgovState(input_path={'controller': [r'C:\Users\User\Desktop\dev\project\BoardController.java'],
+                                           'serviceimpl': [r'C:\Users\User\Desktop\dev\project\BoardService.java'],
+                                           'vo': [r'C:\Users\User\Desktop\dev\project\BoardUpdateDto.java']},
                                 controller=[],
                                 controller_egov=[],
                                 service=[],

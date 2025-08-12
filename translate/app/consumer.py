@@ -3,7 +3,9 @@ import os
 from confluent_kafka import Consumer, KafkaException
 import json
 from log import Logger
-from agent import call_agent
+from conversion_egov import ConversionEgovAgent
+from states import CoversionEgovState
+
 load_dotenv()
 
 class MessageConsumer:
@@ -43,7 +45,30 @@ class MessageConsumer:
 
             self.logger.info(f"{message.topic()} | key: {message.key()} | value: {request}")
             
-            call_agent(request)
+            
+            # # TO-BE: 메세지에서 파일 내용 받도록 바꾸기
+            # state = CoversionEgovState(input_path={'controller': [r'C:\Users\User\Desktop\dev\project\BoardController.java'],
+            #                                         'serviceimpl': [r'C:\Users\User\Desktop\dev\project\BoardService.java'],
+            #                                         'vo': [r'C:\Users\User\Desktop\dev\project\BoardUpdateDto.java']},
+            #                     controller=[],
+            #                     controller_egov=[],
+            #                     service=[],
+            #                     service_egov=[],
+            #                     serviceimpl=[],
+            #                     serviceimpl_egov=[],
+            #                     vo=[],
+            #                     vo_egov=[],
+            #                     validate='',
+            #                     retrieved=[],
+            #                     next_role='',
+            #                     next_step='',
+            #                     controller_report={},
+            #                     service_report={},
+            #                     serviceimpl_report={},
+            #                     vo_report={})
+            # agent = ConversionEgovAgent()
+            # graph = agent.build_graph()
+            # graph.invoke(state)
 
         except Exception as e:
             self.logger.exception(e)

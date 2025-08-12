@@ -3,7 +3,7 @@ import os
 from confluent_kafka import Consumer, KafkaException
 import json
 from log import Logger
-from agent import call_agent, build_agent
+from agent import call_agent
 load_dotenv()
 
 class MessageConsumer:

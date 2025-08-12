@@ -39,7 +39,7 @@ class FileExtractor:
                 if ext in SUPPORTED_LANGUAGES:
                     full_path = os.path.join(root, file)
                     lang = SUPPORTED_LANGUAGES[ext]
-                    result.append((full_path, lang))
+                    result.append({'path': full_path, 'language': lang})
         return result
 
 
