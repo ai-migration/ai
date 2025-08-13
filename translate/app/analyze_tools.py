@@ -1,5 +1,6 @@
-from crewai import Agent, Task, Crew
-from crewai.tools import tool
+from typing import Type, List, Dict, Any
+from crewai.tools import BaseTool
+from pydantic import BaseModel, Field
 
 import xml.etree.ElementTree as ET
 import os, re, json, hashlib
@@ -16,11 +17,19 @@ from producer import MessageProducer
 logger = Logger(name='consumer').logger
 producer = MessageProducer()
 
-def _unwrap_state(s):
-    # {"state": {...}} 로 들어오면 벗겨서 {...}만 반환
-    if isinstance(s, dict) and "state" in s and isinstance(s["state"], dict):
-        return s["state"]
-    return s if isinstance(s, dict) else {}
+class State(BaseModel):
+    user_id: int
+    job_id: int
+    language: str = ''
+    framework: str = ''
+    egov_version: str = ''
+    input_path: str = ''
+    extract_dir: str = ''
+    code_files: List[Dict[str, Any]] = []
+    classes: List[Dict[str, Any]] = []
+    functions: List[Dict[str, Any]] = []
+    java_analysis: List[Dict[str, Any]] = []
+    report_files: List[str] = []
 
 def _rel_to_module(rel_path: str) -> str:
     p = (rel_path or "").replace("\\", "/")
@@ -37,35 +46,30 @@ def _skip(path: str) -> bool:
     p = (path or "").replace("\\", "/").lower()
     return any(s in p for s in IGNORE_SUBSTR)
                
-@tool("preprocessing")
-def preprocessing(input_path: str, extract_dir: str) -> dict:
-    """
-    주어진 extract_dir 경로에 ZIP 파일의 압축을 해제하고 소스 파일을 탐색합니다.
-    """
+def preprocessing(state: dict) -> dict:
     logger.info("Executing node: preprocessing")
 
-    if not all([input_path, extract_dir]):
+    if not all([state['input_path'], state['extract_dir']]):
         logger.error(f"Input path or extract directory not provided in state.")
-        return {'state': {"input_path": input_path, "extract_dir": extract_dir, "code_files": []}}
+        state['code_files'] = []
+        return state
 
     try:
         # FileExtractor가 주어진 경로를 사용하도록 수정합니다.
-        extractor = FileExtractor(input_path, extract_dir)
+        extractor = FileExtractor(state['input_path'], state['extract_dir'])
         extractor.extract_zip()
         code_files = extractor.find_supported_code_files()
-        logger.info(f"Extracted to '{extract_dir}' and found {len(code_files)} supported files.")
-        return {'state': {"input_path": input_path, "extract_dir": extract_dir, "code_files": code_files}}
+        logger.info(f"Extracted to '{state['extract_dir']}' and found {len(code_files)} supported files.")
+        state['code_files'] = code_files
+        return state
     except Exception as e:
         logger.error(f"Preprocessing failed: {e}", exc_info=True)
-        return {'state': {"input_path": input_path, "extract_dir": extract_dir, "code_files": []}}
+        state['code_files'] = []
+        return state
 
-@tool("detect_language")
 def detect_language(state: dict) -> dict:
-    """
-    프로젝트의 주요 언어와 프레임워크를 탐지합니다.
-    Python 파일이 하나라도 존재하면 최우선으로 Python 프로젝트로 판단합니다.
-    """
-
+    print('!!!!!!!!!!!!!!!!!!!!')
+    print(state, )
     code_files = state.get('code_files', [])
     extract_dir = state.get('extract_dir', '')
     # 기본값 설정
@@ -111,13 +115,9 @@ def detect_language(state: dict) -> dict:
     state['egov_version'] = egov_version
     logger.info(f"Detection result (Python Priority): Language={primary_language}, Framework={framework}, Version={egov_version}")
 
-    return {'state': state}
+    return state
 
-@tool("analyze_python")
 def analyze_python(state: dict) -> dict:
-    """
-    Python 파일을 분석하고 클래스 및 함수 구조를 추출합니다.
-    """
     logger.info("Executing node: analyze_python")
     all_classes, all_functions = [], []
     mapper = StructureMapper()
@@ -233,15 +233,9 @@ def analyze_python(state: dict) -> dict:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     state['report_files'] = [output_classes_file, output_functions_file]
-    return {'state': state}
+    return state
 
-
-
-@tool("analyze_java",)
 def analyze_java(state: dict) -> dict:
-    """
-    Java 파일을 분석하고 클래스 및 메소드 구조를 추출합니다.
-    """
     logger.info("Executing node: analyze_java")
     all_classes, query_bank = [], {}
     mapper = StructureMapper()
@@ -308,10 +302,51 @@ def analyze_java(state: dict) -> dict:
     state['report_files'] = [output_file_name]
     state['classes'] = all_classes
     state['java_analysis'] = java_analysis_output
-    return {'state': state}
+    return state
 
-@tool("produce_to_kafka")
-def produce_to_kafka(state: dict):
-    """
-    최종 분석 결과를 Kafka로 발행합니다."""
-    producer.send_message('agent-res', message=state)
+def produce_to_kafka(state: dict) -> dict:
+    producer.send_message('agent-res', message={'user_id': state['user_id'],
+                                                'job_id': state['job_id'],
+                                                'language': state['language'],
+                                                'status': 'SUCCESS'}, headers=[('agent', 'analyze')])
+    return state
+
+class PreprocessingTool(BaseTool):
+    name: str = "preprocessing"
+    description: str = "주어진 extract_dir 경로에 ZIP 파일의 압축을 해제하고 소스 파일을 탐색합니다."
+    args_schema: Type[BaseModel] = State
+
+    def _run(self, **state) -> dict:
+        return preprocessing(state=state)
+
+class DetectLanguageTool(BaseTool):
+    name: str = "detect_language"
+    description: str = " 프로젝트의 주요 언어와 프레임워크를 탐지합니다. Python 파일이 하나라도 존재하면 최우선으로 Python 프로젝트로 판단합니다."
+    args_schema: Type[BaseModel] = State
+
+    def _run(self, **state) -> dict:
+        return detect_language(state=state)
+
+class AnalyzePythonTool(BaseTool):
+    name: str = "analyze_python"
+    description: str = "Python 파일을 분석하고 클래스 및 함수 구조를 추출합니다."
+    args_schema: Type[BaseModel] = State    
+
+    def _run(self, **state) -> dict:
+        return analyze_python(state=state)
+    
+class AnalyzeJavaTool(BaseTool):
+    name: str = "analyze_java"
+    description: str = "Java 파일을 분석하고 클래스 및 메소드 구조를 추출합니다."
+    args_schema: Type[BaseModel] = State        
+
+    def _run(self, **state) -> dict:
+        return analyze_java(state=state)
+    
+class ProduceToKafkaTool(BaseTool):
+    name: str = "produce_to_kafka"
+    description: str = "최종 분석 결과를 Kafka로 발행합니다."
+    args_schema: Type[BaseModel] = State        
+
+    def _run(self, **state) -> dict:
+        return produce_to_kafka(state=state)

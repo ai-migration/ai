@@ -59,7 +59,9 @@ def search_egov_code_core(state: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 def produce_core(state: Dict[str, Any]) -> Dict[str, Any]:
-    producer.send_message('agent-res', message=state)
+    producer.send_message('agent-res', message={'user_id': state['user_id'],
+                                                'job_id': state['job_id'],
+                                                'status': 'SUCCESS'}, headers=[('agent', 'egov')])
 
 def converse_code_core(state: Dict[str, Any]) -> Dict[str, Any]:
     parser = JsonOutputParser()

@@ -48,7 +48,7 @@ response_task = Task(
     expected_output="최종 분석 결과를 kafka로 메세지 발행"
 )
 
-crew = Crew(
+egov_crew = Crew(
     agents=[egov_conv_agent],
     tasks=[conversion_task, response_task],
     verbose=True, memory=False
@@ -93,4 +93,4 @@ if __name__ == '__main__':
                 code = f.read()
                 initial_state[role].append(code)
 
-    result = crew.kickoff(inputs={"state": initial_state})
+    result = egov_crew.kickoff(inputs={"state": initial_state})
