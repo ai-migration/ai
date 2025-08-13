@@ -3,13 +3,17 @@ from langchain.vectorstores import FAISS
 from langchain_core.output_parsers import JsonOutputParser
 
 from crewai import Agent, Task, Crew
-from crewai.tools import tool
+from crewai.tools import tool, BaseTool
 
+from typing import Dict, Any, List, Type, Tuple
+from pydantic import BaseModel
+import json
 from prompts import controller_template, service_prompt, serviceimpl_prompt, vo_prompt
 from producer import MessageProducer
 import os
 
 os.environ['OPENAI_API_KEY'] = ''
+
 LLM = 'gpt-4o-mini'
 EMBEDDING = 'text-embedding-3-small'
 VECTORDB_PATH = r'C:\Users\User\Desktop\dev\project\eGovCodeDB_0805'
@@ -21,105 +25,46 @@ vectordb = FAISS.load_local(VECTORDB_PATH, embeddings=embedding, allow_dangerous
 retriever = vectordb.as_retriever(search_kwargs={"k": 3})
 llm = ChatOpenAI(model=LLM)
 
-        # builder.add_node('preprocessing', self.preprocessing)
-        # builder.add_node('complete', self.is_finished)
-        # builder.add_node('next', self.next_processing)
-        # builder.add_node('rag', self.search_egov_code)
-        # builder.add_node('conversion', self.converse_code)
+class StateArg(BaseModel):
+    state: dict 
 
-@tool('preprocessing')
-def preprocessing(controller: list = [], service: list = [], serviceimpl: list = [], vo: list = []) -> dict:
-    """
-    입력된 코드로 state를 초기화합니다.
-    """
-    state = {
-        'controller': controller,
-        'service': service,
-        'serviceimpl': serviceimpl,  
-        'vo': vo,
-        'controller_egov': [],
-        'service_egov': [],
-        'serviceimpl_egov': [],
-        'vo_egov': [],
-        }
-    return {'state': state}
+def next_processing_core(state: Dict[str, Any]) -> Dict[str, Any]:
+    roles = ['controller','service','serviceimpl','vo']
 
-@tool('check_completed')
-def check_completed(state: dict) -> dict:
-    """
-    주어진 상태(state)에서 eGov 변환 대상이 모두 완료되었는지 확인합니다.
-    """
-    egov_targets = ['controller', 'service', 'serviceimpl', 'vo']
-    is_completed = True
-    for role in egov_targets:
-        # 변환 대상이 있을 때만 egov 리스트가 모두 채워졌는지 확인
-        if state[role]:
-            if not state[f"{role}_egov"] or len(state[role]) != len(state[f"{role}_egov"]):
-                is_completed = False
-                break
+    for role in roles:
+        if state[role] and len(state[role]) != len(state[f"{role}_egov"]):
+            state['next_role'] = role
+            state['next_step'] = 'continue'
+            return state
+        
+    state['next_step'] = 'completed'
+
+    return state
+
+def search_egov_code_core(state: Dict[str, Any]) -> Dict[str, Any]:
+    role = state.get('next_role')
     
-    if is_completed:
-        state['next_step'] = 'completed'
+    if not role:
+        return state
 
-        # with open("agent_test5.json", "w", encoding='utf-8') as json_file:
-        #     json.dump(state, json_file, ensure_ascii=False, indent=2)
-        # producer.send_message('agent-res', message=state)
-
-    else:
-        state['next_step'] = 'continue'
-
-    return {'state': state}
-
-@tool('next_conversion_step')
-def next_conversion_step(state: dict) -> dict:
-    """
-    다음 변환 대상 계층을 결정합니다.
-    """
-    egov_targets = ['controller', 'service', 'serviceimpl', 'vo']
-    for role in egov_targets:
-        # 변환 대상 코드가 있을 때만 변환 진행
-        if state[role]:
-            if len(state[role]) != len(state[f"{role}_egov"]):
-                state['next_role'] = role
-                state['next_step'] = 'conversion'
-                return {'state': state}
-            
-    return {'state': state}
-
-@tool('search_egov_code')
-def search_egov_code(state: dict) -> dict:
-    """
-    주어진 상태(state)에서 유사한 eGov 코드를 검색합니다.
-    """
-    role = state['next_role']
-    results = []
-    for code in state[role]:
+    results: List[str] = []
+    for code in state.get(role, []):
         query = f"[description]\n[role]{role}\n[code]{code}"
-
         docs = retriever.get_relevant_documents(query)
-        role_exam_codes = []
-        for i in docs:
-            print('✅ 검색된 문서', i.metadata, role)
-            if i.metadata['type'].lower() == role:
-                exam_code = i.page_content.split('[code]')[-1]
-                role_exam_codes.append(exam_code)
-
-        results.append(role_exam_codes[0])
-
+        cands = [d.page_content.split('[code]')[-1] for d in docs if d.metadata.get('type','').lower()==role]
+        results.append(cands[0] if cands else "")
+    
     state['retrieved'] = results
-    print('AAAAAAAAAAAAAAAAAAAAAAAAA:', state.keys())
-    return {'state': state}
+    
+    return state
 
-@tool('conversion')
-def converse_code(state: dict) -> dict:
-    """
-    검색된 eGov 코드를 기반으로 변환 작업을 수행합니다.
-    """
-    print('BBBBBBBBBBBBBBBBBBBBBBB:', state.keys())
+def produce_core(state: Dict[str, Any]) -> Dict[str, Any]:
+    producer.send_message('agent-res', message=state)
+
+def converse_code_core(state: Dict[str, Any]) -> Dict[str, Any]:
     parser = JsonOutputParser()
 
     role = state['next_role']
-    print(f"4️⃣ {role} 계층 변환 및 생성:")
     
     if role == 'controller':
         chain = controller_template | llm | parser
@@ -175,10 +120,103 @@ def converse_code(state: dict) -> dict:
             state['vo_egov'].append(res['VO']['code'])
             state['vo_report']['conversion'] = res['VO']['report']
 
-    return {'state': state}
+    return state
 
-@tool('produce_to_kafka')
-def produce_to_kafka(state: dict):
-    """
-    최종 분석 결과를 Kafka로 발행합니다."""
-    producer.send_message('agent-res', message=state)
+def _align_retrieved(state: Dict[str, Any]) -> None:
+    """retrieved 길이가 role 코드 개수보다 짧으면 빈 문자열로 패딩."""
+    role = state.get('next_role')
+
+    if not role:
+        return state
+    
+    src = len(state.get(role, []))
+    retrived_docs = len(state.get('retrieved') or [])
+    print(f"Aligning retrieved: want={src}, got={retrived_docs}")
+    
+    if retrived_docs < src:
+        state['retrieved'] = (state.get('retrieved') or []) + [""] * (src - retrived_docs)
+
+    return state
+
+def _progress_snapshot(state: Dict[str, Any]) -> Tuple[int, int, int, int]:
+    """변환 상태 확인"""
+    return (
+        len(state.get('controller_egov', [])),
+        len(state.get('service_egov', [])),
+        len(state.get('serviceimpl_egov', [])),
+        len(state.get('vo_egov', [])),
+    )
+ 
+class CheckCompletedTool(BaseTool):
+    name: str = "check_completed"
+    description: str = "state를 분석하여 변환을 계속할지(continue) 종료할지(completed) 판정"
+    args_schema: Type[BaseModel] = StateArg
+
+    def _run(self, state: dict) -> dict:
+        roles = ['controller', 'service', 'serviceimpl', 'vo']
+        for role in roles:
+            raw_cnt = len(state.get(role, []) or [])
+            conv_cnt = len(state.get(f"{role}_egov", []) or [])
+            if raw_cnt > conv_cnt:  # 아직 변환할 대상이 남아있음
+                state['next_step'] = 'continue'
+                return state
+        state['next_step'] = 'completed'
+        return state
+
+class ConversionTool(BaseTool):
+    name: str = "conversion_loop"
+    description: str = "입력 dict의 next_step 키 값에 따라 진행/종료 확인 후 진행이면 '다음 변환 계층 설정 -> 유사 코드 검색 -> 변환' 반복 실행"
+    args_schema: Type[BaseModel] = StateArg
+
+    def __init__(self, evaluator: CheckCompletedTool, **kwargs):
+        super().__init__(**kwargs)
+        self._eval = evaluator
+
+    def _run(self, state: dict) -> dict:
+        max_iters = 50
+        prev_progress: Tuple[int, int, int, int] | None = None # controller, service, serviceimpl, vo
+
+        for i in range(max_iters):
+            print(f"✅  Iteration {i+1}")
+            # 1) 진행/종료 판단
+            state = self._eval._run(state)
+            if state.get('next_step') == 'completed':
+                print(f"✅  변환 완료: {state['next_step']}")
+                return state
+
+            # 2) 다음 계층 선택
+            state = next_processing_core(state)  # next_role, next_step=continue
+            print(f"1️⃣  완료 상태: {state['next_step']} 계층 {state['next_role']}")
+            if state.get('next_step') == 'completed':
+                return state
+
+            # 3) RAG
+            state = search_egov_code_core(state)
+            state = _align_retrieved(state)  # 길이 보정 (index error 방지)
+
+            # 4) 변환
+            before = _progress_snapshot(state)
+            print('2️⃣  변환 전 상태:', before)
+            state = converse_code_core(state)
+            after = _progress_snapshot(state)
+            print('3️⃣  변환 후 상태:', after)
+
+            # 5) 무한 루프 방지 용 진행 상태 확인 후 종료 여부 판단 
+            if after == prev_progress or after == before:
+                state = self._eval._run(state)
+                if state.get('next_step') != 'continue':
+                    state['next_step'] = 'completed'
+                return state
+
+            prev_progress = after
+
+        state['next_step'] = 'completed'
+        return state
+    
+class ProduceTool(BaseTool):
+    name: str = "produce_message"
+    description: str = "최종 state를 메세지로 발행"
+    args_schema: Type[BaseModel] = StateArg
+    def _run(self, state: dict) -> dict:
+        return produce_core(state)
+
