@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 @dataclass
 class ToTranslator:
-    id: int
+    job_id: int
     user_id: int
     file_path: str
     input_egov_frame_ver: str

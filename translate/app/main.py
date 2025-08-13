@@ -1,4 +1,4 @@
-from consumer import MessageConsumer
+from translate.app.consumer import MessageConsumer
 
 if __name__ == '__main__':
     consumer = MessageConsumer()

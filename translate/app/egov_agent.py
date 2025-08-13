@@ -1,9 +1,9 @@
-from crewai import Agent, Task, Crew
+from crewai import Agent, Task, Crew, LLM
 from pydantic import BaseModel
 from typing import Dict, Any
 
-from translate.app.egov_tools import CheckCompletedTool, ConversionTool, ProduceTool
-import os
+from translate.app.egov_tools import CheckCompletedTool, ConversionTool, ProduceTool, State
+import os, json
 
 os.environ['OPENAI_API_KEY'] = ''
 
@@ -23,7 +23,8 @@ egov_conv_agent = Agent(
     ),
     tools=[conversion_loop, produce],
     memory=False,
-    verbose=True
+    verbose=True,
+    llm=LLM(model="gpt-4o", temperature=0, api_key=os.environ['OPENAI_API_KEY'])
 )
 
 conversion_task = Task(
@@ -36,18 +37,19 @@ conversion_task = Task(
     agent=egov_conv_agent,
     tools=[conversion_loop],
     input_variables=["state"],
+    output_pydantic=State,
     expected_output="최종 state(dict)"
 )
 
-response_task = Task(
-    description=(
-        "이전 단계의 최종 state를 Kafka에 발행하라. "
-        "produce_to_kafka 도구를 사용한다. "),
-    agent=egov_conv_agent,
-    tools=[produce],
-    context=[conversion_task],
-    expected_output="최종 분석 결과를 kafka로 메세지 발행"
-)
+# response_task = Task(
+#     description=(
+#         "이전 단계의 최종 state를 Kafka에 발행하라. "
+#         "produce_to_kafka 도구를 사용한다. "),
+#     agent=egov_conv_agent,
+#     tools=[produce],
+#     context=[conversion_task],
+#     expected_output="최종 분석 결과를 kafka로 메세지 발행"
+# )
 
 egov_crew = Crew(
     agents=[egov_conv_agent],
@@ -55,36 +57,61 @@ egov_crew = Crew(
     verbose=True, memory=False
 )
 
-def build_initial_state_from_files() -> Dict[str, Any]:
-    input_paths = {
-        'controller': [r'C:\Users\rngus\ai-migration\ai\output\BoardController.java'],
-        'service': [],
-        'serviceimpl': [],
-        'vo': []
-    }
-
+def init_state(path):
+    '''
+    [
+        {
+            "board": {
+                "controller": [
+                    "code",
+                ],
+                "service": [
+                    "code",
+                ]
+            }
+        }
+    ]
+    '''
     state = {
-        'controller': [], 'service': [], 'serviceimpl': [], 'vo': [],
-        'controller_egov': [], 'service_egov': [], 'serviceimpl_egov': [], 'vo_egov': [],
-        'input_path': input_paths,
-        'controller_report': {}, 'service_report': {}, 'serviceimpl_report': {}, 'vo_report': {},
-        'retrieved': [], 'validate': '', 'next_role': '', 'next_step': ''
-    }
+                'controller': [],
+                'service': [],
+                'serviceimpl': [],  
+                'vo': [],
 
-    for role, paths in input_paths.items():
-        for path in paths:
-            with open(path, encoding='utf-8') as f:
-                code = f.read()
-                state[role].append(code)
+                'controller_egov': [],
+                'service_egov': [],
+                'serviceimpl_egov': [],
+                'vo_egov': [],
 
+                'controller_report': {},
+                'service_report': {},
+                'serviceimpl_report': {},
+                'vo_report': {},
+                'retrieved': [],
+                'next_role': '',
+                'next_step': ''
+            }
+
+    with open(path, encoding='utf-8') as f:
+        data = json.load(f)
+
+        for feature in data:
+            for f, role2code in feature.items():
+                for role, codes in role2code.items():
+                    state[role] = codes
+                    
     return state
 
 # 2️⃣ 에이전트 실행 함수
-def run_egov_agent() -> Dict[str, Any]:
-    state = build_initial_state_from_files()
-    return egov_crew.kickoff(inputs={"state": state})
+def run_egov_agent(path='output/java_analysis_results.json') -> Dict[str, Any]:
+    state = init_state(path)
+    result = egov_crew.kickoff(inputs={"state": state})
+    return result
 
 # 3️⃣ CLI 실행 진입점
 if __name__ == '__main__':
     result = run_egov_agent()
     print("[✅ 완료] 최종 상태:", result)
+    
+    with open("./test.json", 'w', encoding='utf-8') as f:
+        json.dump(result.tasks_output[-1].pydantic.model_dump(), f, ensure_ascii=False, indent=2)

@@ -16,7 +16,7 @@ os.environ['OPENAI_API_KEY'] = ''
 
 LLM = 'gpt-4o-mini'
 EMBEDDING = 'text-embedding-3-small'
-VECTORDB_PATH = r'C:\Users\rngus\ai-migration\ai\eGovCodeDB_0805'
+VECTORDB_PATH = r'C:\Users\User\Desktop\dev\project\eGovCodeDB_0805'
 
 producer = MessageProducer()
 
@@ -25,7 +25,7 @@ vectordb = FAISS.load_local(VECTORDB_PATH, embeddings=embedding, allow_dangerous
 retriever = vectordb.as_retriever(search_kwargs={"k": 3})
 llm = ChatOpenAI(model=LLM)
 
-class StateArg(BaseModel):
+class State(BaseModel):
     state: dict 
 
 def next_processing_core(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -140,19 +140,24 @@ def _align_retrieved(state: Dict[str, Any]) -> None:
 
     return state
 
-def _progress_snapshot(state: Dict[str, Any]) -> Tuple[int, int, int, int]:
+def _progress_conv(state: Dict[str, Any]) -> Tuple[int, int, int, int]:
     """변환 상태 확인"""
     return (
+        len(state.get('controller', [])),
+        len(state.get('service', [])),
+        len(state.get('serviceimpl', [])),
+        len(state.get('vo', []))
+    ), (
         len(state.get('controller_egov', [])),
         len(state.get('service_egov', [])),
         len(state.get('serviceimpl_egov', [])),
-        len(state.get('vo_egov', [])),
+        len(state.get('vo_egov', []))
     )
- 
+
 class CheckCompletedTool(BaseTool):
     name: str = "check_completed"
     description: str = "state를 분석하여 변환을 계속할지(continue) 종료할지(completed) 판정"
-    args_schema: Type[BaseModel] = StateArg
+    args_schema: Type[BaseModel] = State
 
     def _run(self, state: dict) -> dict:
         roles = ['controller', 'service', 'serviceimpl', 'vo']
@@ -168,7 +173,7 @@ class CheckCompletedTool(BaseTool):
 class ConversionTool(BaseTool):
     name: str = "conversion_loop"
     description: str = "입력 dict의 next_step 키 값에 따라 진행/종료 확인 후 진행이면 '다음 변환 계층 설정 -> 유사 코드 검색 -> 변환' 반복 실행"
-    args_schema: Type[BaseModel] = StateArg
+    args_schema: Type[BaseModel] = State
 
     def __init__(self, evaluator: CheckCompletedTool, **kwargs):
         super().__init__(**kwargs)
@@ -197,20 +202,20 @@ class ConversionTool(BaseTool):
             state = _align_retrieved(state)  # 길이 보정 (index error 방지)
 
             # 4) 변환
-            before = _progress_snapshot(state)
-            print('2️⃣  변환 전 상태:', before)
+            before_src, before_egov = _progress_conv(state)
+            print(f"2️⃣  변환 전 상태: 원본 -> {before_src} egov -> {before_egov}")
             state = converse_code_core(state)
-            after = _progress_snapshot(state)
-            print('3️⃣  변환 후 상태:', after)
+            after_src, after_egov = _progress_conv(state)
+            print(f"3️⃣  변환 전 상태: 원본 -> {after_src} egov -> {after_egov}")
 
             # 5) 무한 루프 방지 용 진행 상태 확인 후 종료 여부 판단 
-            if after == prev_progress or after == before:
+            if after_egov == prev_progress or after_egov == before_egov:
                 state = self._eval._run(state)
                 if state.get('next_step') != 'continue':
                     state['next_step'] = 'completed'
                 return state
 
-            prev_progress = after
+            prev_progress = after_egov
 
         state['next_step'] = 'completed'
         return state
@@ -218,7 +223,7 @@ class ConversionTool(BaseTool):
 class ProduceTool(BaseTool):
     name: str = "produce_message"
     description: str = "최종 state를 메세지로 발행"
-    args_schema: Type[BaseModel] = StateArg
+    args_schema: Type[BaseModel] = State
     def _run(self, state: dict) -> dict:
         return produce_core(state)
 

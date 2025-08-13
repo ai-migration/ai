@@ -15,10 +15,10 @@ class State(TypedDict):
 def call_agent(request):
     print(request)
     '''
-    request: {'eventType': 'ConversionRequested', 'timestamp': 1754745245253, 'id': 4, 'userId': 1000, 'filePath': None, 'inputeGovFrameVer': '3.8', 'outputeGovFrameVer': '3.10', 'isTestCode': True, 'conversionType': 'CODE'}
+    request: {'eventType': 'ConversionRequested', 'timestamp': 1755069341605, 'jobId': None, 'userId': 11, 'filePath': None, 'inputeGovFrameVer': '3.8', 'outputeGovFrameVer': '3.10', 'isTestCode': True, 'conversionType': 'CODE'}
     '''
     if request['eventType'] == 'ConversionRequested':
-        producer.send_message('conversion', message=asdict(ToTranslator(id=request['id'],
+        producer.send_message('conversion', message=asdict(ToTranslator(job_id=request['jobId'],
                                                                         user_id=request['userId'],
                                                                         file_path=request['filePath'],
                                                                         input_egov_frame_ver=request['inputeGovFrameVer'],

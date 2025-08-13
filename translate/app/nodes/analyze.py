@@ -197,11 +197,12 @@ def analyze_java(state: State) -> State:
             if role == 'serviceimpl':
                 role = 'service'  # 요약 관점에선 SERVICE로 통합
             path = (cls.get('source_info') or {}).get('rel_path')
-            if not path:
+            code = cls.get('body', {})
+            if not code:
                 continue
             lst = feature_set.setdefault(role, [])
-            if path not in lst:        # <-- 경로 단위 dedup
-                lst.append(path)
+            if code not in lst:        # <-- 경로 단위 dedup
+                lst.append(code)
 
         if feature_set:
             # 보기 좋게 경로 오름차순 정렬(안정성)
@@ -211,7 +212,7 @@ def analyze_java(state: State) -> State:
 
     output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
-    output_file_name = os.path.join(output_dir, "analysis_results.json")
+    output_file_name = os.path.join(output_dir, "java_analysis_results.json")
     with open(output_file_name, "w", encoding="utf-8") as f:
         json.dump(java_analysis_output, f, ensure_ascii=False, indent=4)
 
