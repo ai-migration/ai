@@ -2,12 +2,14 @@
 
 메인 에이전트 설명
  
-패키지 단위로 실행(그래서 import를 좀 변경 했습니다):python -m translate.app.orchestrator   다른 각각의 에이전트 체크시   python -m translate.app.egov_agent 이런식으로 하시면 각각 툴 에이전트 확인 가능하실겁니다 
+패키지 단위로 실행(그래서 import를 좀 변경 했습니다):  python -m translate.app.orchestrator   다른 각각의 에이전트 체크시   python -m translate.app.egov_agent 이런식으로 하시면 각각 툴 에이전트 확인 가능하실겁니다 
 
 orchestrator.py 가 메인 에이전트
 
 from translate.app.agent_analyze_test import AnalysisTestAgent
+
 from translate.app.python_agent import run_python_agent
+
 from translate.app.egov_agent import run_egov_agent  
 
 위의 3가지 툴을 사용
