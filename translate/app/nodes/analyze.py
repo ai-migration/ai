@@ -158,29 +158,55 @@ def analyze_java(state: State) -> State:
             cls['role'] = mapper.infer_class_role(cls)
             all_classes.append(cls)
 
+    # 클래스 객체 자체 dedup (같은 파일/이름/본문은 1개로)
+    seen_keys = set()
+    uniq_classes = []
+    for c in all_classes:
+        rel = (c.get("source_info") or {}).get("rel_path")
+        key = (rel, c.get("name"), _body_hash(c))  # _body_hash는 파일 상단에 이미 정의됨
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        uniq_classes.append(c)
+    all_classes = uniq_classes
+
+
     # feature 그룹핑 → 요약
     classes_by_feature = {}
     for cls in all_classes:
         class_name = cls.get("name", "")
-        match = re.search(r'^(.*?)(Controller|Service|ServiceImpl|Repository|DAO|VO|Dto|Entity|Config|Exception|Util|Filter|Jwt|Impl|Tests|Test)$', class_name, re.IGNORECASE)
+        match = re.search(
+            r'^(.*?)(Controller|Service|ServiceImpl|Repository|DAO|VO|Dto|Entity|Config|Exception|Util|Filter|Jwt|Impl|Tests|Test)$',
+            class_name, re.IGNORECASE
+        )
         feature = "unknown"
         if match and match.group(1):
             feature_candidate = re.sub(r'^(Res|Req)', '', match.group(1), flags=re.IGNORECASE)
             feature = feature_candidate.lower() if feature_candidate else class_name.lower()
         elif not match:
             feature = class_name.lower()
-        if class_name.endswith("Application"): feature = "app"
+        if class_name.endswith("Application"):
+            feature = "app"
         classes_by_feature.setdefault(feature, []).append(cls)
 
     java_analysis_output = []
     for feature, classes in classes_by_feature.items():
         feature_set = {}
         for cls in classes:
-            role = cls.get('role', {}).get('type', 'unknown').lower()
-            if role == 'serviceimpl': role = 'service'  # 요약은 SERVICE로 통합
-            path = cls.get('source_info', {}).get('rel_path')
-            feature_set.setdefault(role, []).append(path)
+            role = (cls.get('role', {}) or {}).get('type', 'unknown').lower()
+            if role == 'serviceimpl':
+                role = 'service'  # 요약 관점에선 SERVICE로 통합
+            path = (cls.get('source_info') or {}).get('rel_path')
+            if not path:
+                continue
+            lst = feature_set.setdefault(role, [])
+            if path not in lst:        # <-- 경로 단위 dedup
+                lst.append(path)
+
         if feature_set:
+            # 보기 좋게 경로 오름차순 정렬(안정성)
+            for r in feature_set:
+                feature_set[r] = sorted(feature_set[r])
             java_analysis_output.append({feature: feature_set})
 
     output_dir = "output"
