@@ -36,6 +36,7 @@ def java_to_egov() -> Dict[str, Any]:
 이 3가지 함수에 카프카 설정을 하면 좋을거 같습니다 지금 리턴을 바로 에이전트에 주는 방식인데
 
 def py_to_java(outdir: str) -> Dict[str, Any]:
+
     result=run_python_agent(limit=2)
     return  result  
 
