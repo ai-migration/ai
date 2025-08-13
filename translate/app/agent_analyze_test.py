@@ -5,10 +5,11 @@ import tempfile
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, START, END
 
-from app.states import State
-from app.nodes.preprocess import preprocessing
-from app.nodes.detect import detect_language, select_lang
-from app.nodes.analyze import analyze_python, analyze_java
+from translate.app.states import State
+from translate.app.nodes.preprocess import preprocessing
+from translate.app.nodes.detect import detect_language, select_lang
+from translate.app.nodes.analyze import analyze_python, analyze_java
+
 load_dotenv()
 
 # 콘솔은 요약 위주
@@ -35,8 +36,8 @@ if __name__ == '__main__':
     agent = AnalysisTestAgent()
     graph = agent.build_graph()
 
-    sample_zip_name = "django-main.zip"
-    input_zip_path = os.path.join("samples", sample_zip_name)
+    sample_zip_name = "models.zip"
+    input_zip_path = r'C:\Users\rngus\ai-migration\ai\test\test.zip' 
 
     if not os.path.exists(input_zip_path):
         logging.error(f"샘플 파일을 찾을 수 없습니다: {input_zip_path}")

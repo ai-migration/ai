@@ -1,11 +1,11 @@
 # app/nodes/analyze.py
 import os, re, json, logging, hashlib
-from app.states import State
-from app.analyzer.python_analyzer import PythonAnalyzer
-from app.analyzer.java_analyzer import JavaAnalyzer
-from app.analyzer.xml_mapper_analyzer import XmlMapperAnalyzer
-from app.analyzer.structure_mapper import StructureMapper
-from app.analyzer.external_usage_detector import ExternalUsageDetector
+from translate.app.states import State
+from translate.app.analyzer.python_analyzer import PythonAnalyzer
+from translate.app.analyzer.java_analyzer import JavaAnalyzer
+from translate.app.analyzer.xml_mapper_analyzer import XmlMapperAnalyzer
+from translate.app.analyzer.structure_mapper import StructureMapper
+from translate.app.analyzer.external_usage_detector import ExternalUsageDetector
 
 logger = logging.getLogger(__name__)
 
