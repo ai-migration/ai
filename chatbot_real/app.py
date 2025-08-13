@@ -1,172 +1,361 @@
+# app.py — eGovFrame 톤, 한 화면(업로드+인덱싱+챗봇)
+# - 답변 가독성 향상(기호/숫자 기준 줄바꿈)
+# - "n페이지 요약" 시 해당 페이지 이미지 시각화(채팅 말풍선 내부)
 import os
 import re
+import time
+import base64
+import html as pyhtml
 import streamlit as st
+import pdfplumber
+import fitz  # PyMuPDF
 
-# ── 몽키패치: langchain_community 구버전 ChatCompletion.create → v1 API 매핑 ──
-import openai as _openai_module
-from openai import OpenAI as OpenAIClient
-
-def _legacy_chat_completion_create(
-    *, model=None, model_name=None, openai_api_key=None, **kwargs
-):
-    actual_model = model or model_name
-    key = openai_api_key or st.secrets["OPENAI_API_KEY"]
-    client = OpenAIClient(api_key=key)
-    return client.chat.completions.create(model=actual_model, **kwargs)
-
-_openai_module.ChatCompletion = type(
-    "ChatCompletion", (), {"create": staticmethod(_legacy_chat_completion_create)}
-)
-
-# ── 나머지 import ──
-from openai import OpenAI as OpenAIClientRaw
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
 from langchain_community.document_loaders import PDFPlumberLoader
-from langchain_community.embeddings.openai import OpenAIEmbeddings
-from langchain_community.vectorstores.chroma import Chroma
-from langchain_community.llms.openai import OpenAI as CC_OpenAI
-from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-import fitz
+from langchain.chains import RetrievalQA
 
-# Streamlit 레이아웃
-st.set_page_config(layout="wide", page_title="전자정부 프레임워크 챗봇")
-col1, col2 = st.columns([2, 1])
+# ================== 설정 ==================
+APP_TITLE = "eGovFrame 챗봇"
+PERSIST_DIR = "egov_chroma_db"
+UPLOADED_PDF_PATH = "uploaded_egov.pdf"
+EMBEDDING_MODEL = "text-embedding-3-small"
+CHAT_MODEL = "gpt-4o-mini"
+TOP_K = 3
 
-# ▶ 오른쪽: PDF 업로드 & 인덱스 1회 생성
-with col2:
-    st.header("PDF 업로드 및 뷰어")
-    uploaded = st.file_uploader("PDF 업로드", type="pdf")
-    if uploaded and "vectordb" not in st.session_state:
-        st.info("PDF 인덱싱 중…")
-        path = "uploaded_egov.pdf"
-        with open(path, "wb") as f:
-            f.write(uploaded.getbuffer())
-        st.session_state["uploaded_path"] = path
+# OpenAI Key (.streamlit/secrets.toml)
+if "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
-        loader = PDFPlumberLoader(path)
-        docs = loader.load()
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-        chunks = splitter.split_documents(docs)
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 
-        embeddings = OpenAIEmbeddings()
-        vectordb = Chroma.from_documents(chunks, embeddings, persist_directory="egov_chroma_db")
-        st.session_state.vectordb = vectordb
+# ================== 스타일 ==================
+st.markdown("""
+<style>
+:root{
+  --egov-primary:#0B5ED7; --egov-border:#e5e7eb; --egov-muted:#6b7280;
+}
+.block-container{padding-top:0.8rem;}
+.egov-topbar{background:var(--egov-primary); color:#fff; padding:14px 16px; border-radius:10px; margin-bottom:10px;}
+.egov-title{font-size:18px; font-weight:700;}
+.egov-sub{font-size:12px; opacity:.9;}
+.egov-card{background:#fff; border:1px solid var(--egov-border); border-radius:12px; padding:14px;}
+.egov-label{font-weight:600; font-size:14px;}
+.egov-required::after{content:" *"; color:#dc2626;}
 
-        pdf_doc = fitz.open(stream=uploaded.getbuffer(), filetype="pdf")
-        st.session_state.page_images = [
-            page.get_pixmap(dpi=150).tobytes("png") for page in pdf_doc
-        ]
-        st.success("업로드 완료! 🎉")
+#chat-box{
+  height:62vh; overflow-y:auto; border:1px solid var(--egov-border);
+  border-radius:12px; padding:10px; background:#fff;
+}
+.bubble{max-width:92%; padding:10px 12px; border-radius:12px; margin:6px 0; display:inline-block; line-height:1.5; word-break:break-word;}
+.user{background:#eef2ff; color:#1e3a8a; margin-left:auto;}
+.bot{background:#f3f4f6; color:#111827; margin-right:auto;}
+.row{display:flex; width:100%;}
+.meta{font-size:11px; color:var(--egov-muted); margin-top:6px;}
+.chat-input-row{display:flex; gap:8px; margin-top:8px;}
+.chat-input-row > div{flex:1;}
+img.chat-page{max-width:100%; border-radius:8px; border:1px solid #eee; margin-top:8px;}
+</style>
+""", unsafe_allow_html=True)
 
-    if "page_images" in st.session_state:
-        st.subheader("PDF 미리보기")
-        for i, img in enumerate(st.session_state.page_images[:5], 1):
-            st.image(img, caption=f"Page {i}", width=100)
+# ================== 세션 ==================
+default_state = {
+    "vectordb": None,
+    "history": [],  # list of dicts OR tuples (for 호환): {"role":"user"/"assistant","text":..., "image_b64":..., "image_page":...}
+    "pdf_meta": {"name": None, "pages": 0},
+}
+for k, v in default_state.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-# ▶ 왼쪽: 챗봇 UI
-with col1:
-    st.title("전자정부 프레임워크 챗봇")
-    if "openai_model" not in st.session_state:
-        st.session_state["openai_model"] = "gpt-3.5-turbo"
+# ================== 유틸 ==================
+def load_vectordb_if_exists():
+    if os.path.isdir(PERSIST_DIR):
+        try:
+            emb = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+            st.session_state.vectordb = Chroma(persist_directory=PERSIST_DIR, embedding_function=emb)
+            return True
+        except Exception:
+            return False
+    return False
 
-    # 시스템 메시지 초기화
-    if "initialized" not in st.session_state:
-        st.session_state.messages = [{
-            "role": "system",
-            "content": (
-                "전자정부 표준프레임워크 관련 질문은 문서를 기반으로 답변하고, "
-                "그 외 일반 대화(인사, 잡담 등)는 자연스럽게 한국어로 응답하세요."
-            )
-        }]
-        st.session_state.initialized = True
+def build_index_from_pdf(pdf_path: str):
+    loader = PDFPlumberLoader(pdf_path)
+    docs = loader.load()
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=120)
+    chunks = splitter.split_documents(docs)
+    emb = OpenAIEmbeddings(model=EMBEDDING_MODEL)
+    vectordb = Chroma.from_documents(chunks, embedding=emb, persist_directory=PERSIST_DIR)
+    vectordb.persist()
+    st.session_state.vectordb = vectordb
 
-    # 클라이언트 준비
-    raw_client = OpenAIClientRaw(api_key=st.secrets["OPENAI_API_KEY"])
-    chain_llm  = CC_OpenAI(
-        model_name=st.session_state.get("openai_model", "gpt-3.5-turbo"),
-        openai_api_key=st.secrets["OPENAI_API_KEY"],
-        temperature=0
+def extract_page_count(pdf_path: str) -> int:
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            return len(pdf.pages)
+    except Exception:
+        return 0
+
+def extract_page_text(pdf_path: str, page_number: int) -> str:
+    """1-based page number; pdfplumber로 직접 추출"""
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            if 1 <= page_number <= len(pdf.pages):
+                return pdf.pages[page_number-1].extract_text() or ""
+    except Exception:
+        pass
+    return ""
+
+def render_page_image_b64(pdf_path: str, page_no: int, zoom: float = 1.6) -> str | None:
+    """해당 페이지를 PNG로 렌더링해 base64 문자열을 반환"""
+    try:
+        doc = fitz.open(pdf_path)
+        if 1 <= page_no <= len(doc):
+            page = doc.load_page(page_no - 1)
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat, alpha=False)
+            b = pix.tobytes("png")
+            return base64.b64encode(b).decode("utf-8")
+    except Exception:
+        return None
+    return None
+
+def summarize_page(page_no: int) -> tuple[str, str | None]:
+    """
+    요약 텍스트와 (가능하면) 해당 페이지 이미지 base64를 함께 반환.
+    1) pdfplumber로 텍스트 추출
+    2) 실패 시, Chroma 인덱스에서 해당 페이지 문서 모아 요약
+    """
+    # 1) 직접 추출
+    text = extract_page_text(UPLOADED_PDF_PATH, page_no)
+
+    # 2) 폴백: 인덱스에서 특정 페이지 문서 모으기
+    if (not text.strip()) and (st.session_state.vectordb is not None):
+        try:
+            col = getattr(st.session_state.vectordb, "_collection", None)
+            if col is not None and hasattr(col, "get"):
+                merged = ""
+                for key in (page_no-1, page_no, str(page_no-1), str(page_no)):
+                    out = col.get(where={"page": key})
+                    if out and out.get("documents"):
+                        merged += "\n".join(out["documents"]) + "\n"
+                if merged.strip():
+                    text = merged
+        except Exception:
+            pass
+
+    if not text.strip():
+        return "해당 페이지에서 텍스트를 찾지 못했습니다. (스캔본일 수 있어요)", None
+
+    prompt = (
+        "아래는 전자정부 표준 문서의 일부입니다.\n"
+        "과장 없이 핵심만 5~8줄로 한국어 요약하세요. 항목은 '-'로 시작해 주세요.\n\n"
+        f"---\n{text}\n---"
     )
+    llm = ChatOpenAI(model=CHAT_MODEL, temperature=0.2, max_tokens=900)
+    out = llm.invoke(prompt)
+    answer = out.content if hasattr(out, "content") else str(out)
 
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    img_b64 = render_page_image_b64(UPLOADED_PDF_PATH, page_no)
+    return answer, img_b64
 
-    if prompt := st.chat_input("질문을 입력하세요"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+def rag_answer(query: str, k: int = TOP_K):
+    llm = ChatOpenAI(model=CHAT_MODEL, temperature=0.2)
+    if st.session_state.vectordb is None:
+        resp = llm.invoke("다음 질문에 한국어로 간결하게 답해줘.\n질문: " + query)
+        return (resp.content if hasattr(resp, "content") else str(resp)), []
+    retriever = st.session_state.vectordb.as_retriever(search_kwargs={"k": int(k)})
+    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, return_source_documents=True)
+    result = qa.invoke({"query": query})
+    return result.get("result", ""), result.get("source_documents", [])
 
-        reply = None
-        docs_and_scores = []
+def format_answer_html(text: str, is_assistant: bool = True) -> str:
+    """
+    답변 가독성 향상을 위해:
+    - HTML 이스케이프 → 안전 출력
+    - 줄바꿈(\n) 유지
+    - ' - ', ' • ', ' · ' 같은 구분자 앞에 줄바꿈 삽입
+    - 숫자목록 ' 1. ', ' 2) ' 패턴에도 줄바꿈 삽입
+    """
+    if text is None:
+        return ""
+    s = pyhtml.escape(text)
 
-        # 1) 인사 처리
-        if prompt.strip().lower() in {"안녕","안녕하세요","hi","hello"}:
-            resp = raw_client.chat.completions.create(
-                model=st.session_state["openai_model"],
-                messages=st.session_state.messages
-            )
-            reply = resp.choices[0].message.content
+    # 기본 줄바꿈
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
 
-        # 2) 페이지 요약 처리
+    # bullet 기호 앞에 줄바꿈 삽입
+    s = s.replace(" • ", "<br> • ").replace(" · ", "<br> · ").replace(" - ", "<br> - ")
+
+    # 숫자 목록(1. / 1) / 1 ) / ① 등 간단 패턴)
+    s = re.sub(r'(?<!^)\s(?=\d{1,2}[.)]\s)', '<br>', s)
+    s = re.sub(r'(?<!^)\s(?=[①-⑳])', '<br>', s)
+
+    # 최종 개행 처리
+    s = s.replace("\n", "<br>")
+    return s
+
+# 최초 진입 시 기존 인덱스 자동 로드
+if st.session_state.vectordb is None:
+    load_vectordb_if_exists()
+
+# ================== 상단바 ==================
+st.markdown(f"""
+<div class="egov-topbar">
+  <div class="egov-title">{APP_TITLE}</div>
+  <div class="egov-sub">문서 업로드 → 적용 후, 오른쪽 챗봇에서 질문하세요.</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ================== 레이아웃 ==================
+left, right = st.columns([1, 2], gap="large")
+
+# ---- 좌: 업로드/인덱싱 ----
+with left:
+    st.markdown('<div class="egov-card">', unsafe_allow_html=True)
+    st.markdown('<div class="egov-label egov-required">문서 업로드(PDF)</div>', unsafe_allow_html=True)
+    file = st.file_uploader("전자정부 표준프레임워크 관련 PDF를 선택하세요.", type=["pdf"], label_visibility="collapsed")
+    st.caption("업로드 후 ‘적용’ 버튼을 누르면 챗봇이 문서를 근거로 답합니다.")
+
+    c1, c2 = st.columns(2)
+    apply_click = c1.button("적용", type="primary", use_container_width=True)
+    reset_click = c2.button("초기화", use_container_width=True)
+
+    if reset_click:
+        try:
+            if os.path.exists(UPLOADED_PDF_PATH):
+                os.remove(UPLOADED_PDF_PATH)
+        except Exception:
+            pass
+        try:
+            import shutil
+            if os.path.isdir(PERSIST_DIR):
+                shutil.rmtree(PERSIST_DIR)
+        except Exception:
+            pass
+        st.session_state.vectordb = None
+        st.session_state.history = []
+        st.session_state.pdf_meta = {"name": None, "pages": 0}
+        st.toast("초기화 완료", icon="✅")
+
+    if apply_click:
+        if file is None:
+            st.warning("업로드할 PDF를 선택하세요.")
         else:
-            m = re.match(r"(\d+)\s*페이지 요약", prompt)
-            if m and "uploaded_path" in st.session_state:
-                target = int(m.group(1)) - 1
-                loader = PDFPlumberLoader(st.session_state["uploaded_path"])
-                all_docs = loader.load()
-                page_texts = [
-                    d.page_content
-                    for d in all_docs
-                    if d.metadata.get("page",1)-1 == target
-                ]
-                to_sum = "\n".join(page_texts)
-                resp = raw_client.chat.completions.create(
-                    model=st.session_state["openai_model"],
-                    messages=[
-                        {"role":"system","content":"다음 텍스트를 한국어로 간결히 요약해 주세요."},
-                        {"role":"user","content":to_sum}
-                    ]
-                )
-                reply = resp.choices[0].message.content
-                docs_and_scores = [{"metadata":{"page":target+1}}]
+            with st.spinner("업로드 중..."):
+                with open(UPLOADED_PDF_PATH, "wb") as f:
+                    f.write(file.getbuffer())
+                st.session_state.pdf_meta["name"] = file.name
+                st.session_state.pdf_meta["pages"] = extract_page_count(UPLOADED_PDF_PATH)
+                build_index_from_pdf(UPLOADED_PDF_PATH)
+            st.success("적용 완료! 이제 오른쪽 챗봇에 질문해보세요.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        # 3) 일반 RAG vs GPT
-        if reply is None and "vectordb" in st.session_state:
-            retriever = st.session_state.vectordb.as_retriever(search_kwargs={"k":3})
-            docs_and_scores = retriever.get_relevant_documents(prompt)
-            if docs_and_scores:
-                qa = RetrievalQA.from_chain_type(
-                    llm=chain_llm, chain_type="stuff", retriever=retriever
-                )
-                reply = qa.run(prompt)
+# ---- 우: 챗봇(스크롤 박스 + 입력) ----
+with right:
+    st.markdown('<div class="egov-card">', unsafe_allow_html=True)
+    st.markdown("#### 챗봇 대화", unsafe_allow_html=True)
 
-                # RAG이 “모르겠다”류면 GPT로 재시도
-                if any(kw in reply.lower() for kw in ["i'm sorry","don't know","정보가 없습니다"]):
-                    reply = None
-                    docs_and_scores = []
+    # 채팅 박스(스크롤)
+    chat_html = ['<div id="chat-box">']
+    if not st.session_state.history:
+        chat_html.append('<div class="row"><div class="bubble bot">안녕하세요! 어떻게 도와드릴까요?</div></div>')
+    else:
+        for item in st.session_state.history[-200:]:
+            # 과거 튜플 호환 처리
+            if isinstance(item, tuple):
+                role, content = item
+                text = content
+                image_b64 = None
+                image_page = None
+            else:
+                role = item.get("role", "assistant")
+                text = item.get("text", "")
+                image_b64 = item.get("image_b64")
+                image_page = item.get("image_page")
 
-        # 4) 최종 GPT fallback
-        if reply is None:
-            resp = raw_client.chat.completions.create(
-                model=st.session_state["openai_model"],
-                messages=st.session_state.messages
-            )
-            reply = resp.choices[0].message.content
+            klass = "user" if role == "user" else "bot"
+            if role == "assistant":
+                text_html = format_answer_html(text, True)
+            else:
+                text_html = pyhtml.escape(text).replace("\n", "<br>")
 
-        st.session_state.messages.append({"role":"assistant","content":reply})
-        with st.chat_message("assistant"):
-            st.markdown(reply)
+            bubble = f'<div class="row"><div class="bubble {klass}">{text_html}'
+            if image_b64:
+                bubble += f'<img class="chat-page" src="data:image/png;base64,{image_b64}" />'
+                if image_page:
+                    bubble += f'<div class="meta">페이지 {image_page} 미리보기</div>'
+            bubble += '</div></div>'
+            chat_html.append(bubble)
+    chat_html.append("</div>")
+    st.markdown("\n".join(chat_html), unsafe_allow_html=True)
 
-        # 5) RAG 모드일 때만 페이지 이미지
-        if docs_and_scores:
-            pages = sorted({
-                (d["metadata"]["page"]-1) if isinstance(d, dict) else d.metadata.get("page",1)-1
-                for d in docs_and_scores
-            })
-            for pg in pages:
-                with st.expander(f"관련 페이지: {pg+1}"):
-                    st.image(st.session_state.page_images[pg], use_container_width=True)
+    # 입력창을 만들기 전에 clear 플래그 확인(위젯 생성 전 초기화)
+    if st.session_state.get("clear_input"):
+        st.session_state["user_input"] = ""
+        del st.session_state["clear_input"]
+
+    # 입력창 + 전송 버튼 (한 줄)
+    c = st.container()
+    with c:
+        left_in, right_btn = st.columns([6, 1])
+        user_text = left_in.text_input(
+            "질문을 입력하세요. (예: 9페이지 요약해줘)",
+            key="user_input",
+            label_visibility="collapsed",
+        )
+        send = right_btn.button("전송", use_container_width=True)
+
+    # 전송 처리
+    if send and user_text.strip():
+        q = user_text.strip()
+        st.session_state.history.append({"role": "user", "text": q})
+
+        # "n페이지 요약" 우선 처리
+        page_pat = re.search(r'(\d+)\s*(?:페이지|쪽|page|p)\b', q, flags=re.I)
+        wants_summary = ("요약" in q) and (page_pat is not None)
+
+        if wants_summary and os.path.exists(UPLOADED_PDF_PATH):
+            page_no = int(page_pat.group(1))
+            maxp = st.session_state.pdf_meta.get("pages") or 0
+            if maxp and (page_no < 1 or page_no > maxp):
+                answer = f"{page_no}페이지는 범위를 벗어났습니다. 1~{maxp} 사이로 요청해주세요."
+                st.session_state.history.append({"role": "assistant", "text": answer})
+            else:
+                with st.spinner(f"{page_no}페이지 요약 중..."):
+                    answer, img_b64 = summarize_page(page_no)
+                st.session_state.history.append({
+                    "role": "assistant",
+                    "text": answer,
+                    "image_b64": img_b64,
+                    "image_page": page_no
+                })
+        else:
+            # 일반 RAG 질의
+            with st.spinner("생각 중..."):
+                answer, _ = rag_answer(q, k=TOP_K)
+            st.session_state.history.append({"role": "assistant", "text": answer})
+
+        # 입력창은 직접 비우지 말고, 플래그만 세운 후 rerun
+        st.session_state["clear_input"] = True
+        st.rerun()
+
+    # 채팅 박스 하단 스크롤
+    st.markdown("""
+        <script>
+        const box = window.parent.document.querySelector('#chat-box');
+        if (box) { box.scrollTop = box.scrollHeight; }
+        </script>
+    """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+
+
+
+
                     
                     
 
