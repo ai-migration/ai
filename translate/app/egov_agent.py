@@ -1,7 +1,8 @@
 from crewai import Agent, Task, Crew
 from pydantic import BaseModel
+from typing import Dict, Any
 
-from egov_tools import CheckCompletedTool, ConversionTool, ProduceTool
+from translate.app.egov_tools import CheckCompletedTool, ConversionTool, ProduceTool
 import os
 
 os.environ['OPENAI_API_KEY'] = ''
@@ -50,47 +51,40 @@ response_task = Task(
 
 egov_crew = Crew(
     agents=[egov_conv_agent],
-    tasks=[conversion_task, response_task],
+    tasks=[conversion_task],
     verbose=True, memory=False
 )
 
-if __name__ == '__main__':
-    import tempfile
-    import json
-    input_zip_path = r'C:\Users\User\Desktop\dev\project\0811test.zip'  
-
-    input = {'controller': [r'C:\Users\User\Desktop\dev\project\BoardController.java'],
-            'serviceimpl': [],
-            # 'serviceimpl': [r'C:\Users\User\Desktop\dev\project\BoardService.java'],
-            'service': [],
-            'vo': []}
-            # 'vo': [r'C:\Users\User\Desktop\dev\project\BoardUpdateDto.java']}
-    
-    initial_state = {
-        'controller': [],
+def build_initial_state_from_files() -> Dict[str, Any]:
+    input_paths = {
+        'controller': [r'C:\Users\rngus\ai-migration\ai\output\BoardController.java'],
         'service': [],
-        'serviceimpl': [],  
-        'vo': [],
-
-        'controller_egov': [],
-        'service_egov': [],
-        'serviceimpl_egov': [],
-        'vo_egov': [],
-
-        'input_path': {},
-        'controller_report': {},
-        'service_report': {},
-        'serviceimpl_report': {},
-        'vo_report': {},
-        'retrieved': [],
-        'validate': '',
-        'next_role': '',
-        'next_step': ''
+        'serviceimpl': [],
+        'vo': []
     }
-    for role, paths in input.items():
-        for p in paths:
-            with open(p, encoding='utf-8') as f:
-                code = f.read()
-                initial_state[role].append(code)
 
-    result = egov_crew.kickoff(inputs={"state": initial_state})
+    state = {
+        'controller': [], 'service': [], 'serviceimpl': [], 'vo': [],
+        'controller_egov': [], 'service_egov': [], 'serviceimpl_egov': [], 'vo_egov': [],
+        'input_path': input_paths,
+        'controller_report': {}, 'service_report': {}, 'serviceimpl_report': {}, 'vo_report': {},
+        'retrieved': [], 'validate': '', 'next_role': '', 'next_step': ''
+    }
+
+    for role, paths in input_paths.items():
+        for path in paths:
+            with open(path, encoding='utf-8') as f:
+                code = f.read()
+                state[role].append(code)
+
+    return state
+
+# 2️⃣ 에이전트 실행 함수
+def run_egov_agent() -> Dict[str, Any]:
+    state = build_initial_state_from_files()
+    return egov_crew.kickoff(inputs={"state": state})
+
+# 3️⃣ CLI 실행 진입점
+if __name__ == '__main__':
+    result = run_egov_agent()
+    print("[✅ 완료] 최종 상태:", result)

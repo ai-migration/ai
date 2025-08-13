@@ -2,8 +2,8 @@
 import os
 import logging
 import tempfile
-from app.states import State
-from app.analyzer.file_extractor import FileExtractor
+from translate.app.states import State
+from translate.app.analyzer.file_extractor import FileExtractor
 
 # 로깅 기본 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

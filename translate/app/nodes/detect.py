@@ -2,7 +2,7 @@
 import os
 import logging
 import xml.etree.ElementTree as ET
-from app.states import State
+from translate.app.states import State
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 

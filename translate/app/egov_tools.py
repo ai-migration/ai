@@ -8,15 +8,15 @@ from crewai.tools import tool, BaseTool
 from typing import Dict, Any, List, Type, Tuple
 from pydantic import BaseModel
 import json
-from prompts import controller_template, service_prompt, serviceimpl_prompt, vo_prompt
-from producer import MessageProducer
+from translate.app.prompts import controller_template, service_prompt, serviceimpl_prompt, vo_prompt
+from translate.app.producer import MessageProducer
 import os
 
 os.environ['OPENAI_API_KEY'] = ''
 
 LLM = 'gpt-4o-mini'
 EMBEDDING = 'text-embedding-3-small'
-VECTORDB_PATH = r'C:\Users\User\Desktop\dev\project\eGovCodeDB_0805'
+VECTORDB_PATH = r'C:\Users\rngus\ai-migration\ai\eGovCodeDB_0805'
 
 producer = MessageProducer()
 

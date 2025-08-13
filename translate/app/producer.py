@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 import os
 from confluent_kafka import Producer, KafkaException
 import json
-from log import Logger
+from translate.app.log import Logger
 
 load_dotenv()
 
