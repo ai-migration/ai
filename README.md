@@ -15,6 +15,7 @@ from translate.app.egov_agent import run_egov_agent
 카프카의 경우 정확히 어떻게 설계 되고 있는지 모르겠지만 
 
 def run_analysis(input_path: str, extract_dir: str) -> Dict[str, Any]:
+
     graph = AnalysisTestAgent().build_graph()
     state = {"input_path": input_path, "extract_dir": extract_dir}
     final_state = graph.invoke(state)
@@ -25,9 +26,11 @@ def run_analysis(input_path: str, extract_dir: str) -> Dict[str, Any]:
     return summary
 
 def py_to_java(outdir: str) -> Dict[str, Any]:
+
     return run_python_agent(limit=2)
 
 def java_to_egov() -> Dict[str, Any]:
+
     return run_egov_agent()
 
     이 3가지 함수에 카프카 설정을 하면 좋을거 같습니다 지금 리턴을 바로 에이전트에 주는 방식인데
