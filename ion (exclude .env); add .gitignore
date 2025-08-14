@@ -1,0 +1,31 @@
+[35mdowngrade_version/multi_version_transform.py[m[36m:[m[32m23[m[36m:[m        openai_api_key=os.getenv("[1;31mOPENAI_API_KEY[m")  # ✅ 여기를 반드시 확인
+[35mdowngrade_version/version_downgrade_agent.py[m[36m:[m[32m13[m[36m:[m1) [1;31mOPENAI_API_KEY[m (.env 또는 환경변수)
+[35mdowngrade_version/version_downgrade_agent.py[m[36m:[m[32m48[m[36m:[m    if not os.getenv("[1;31mOPENAI_API_KEY[m"):
+[35mdowngrade_version/version_downgrade_agent.py[m[36m:[m[32m50[m[36m:[m            "[1;31mOPENAI_API_KEY[m가 설정되지 않았습니다. .env 또는 환경 변수로 설정해 주세요."
+[35membed_version_documents.py[m[36m:[m[32m11[m[36m:[m[1;31mOPENAI_API_KEY[m = os.getenv("[1;31mOPENAI_API_KEY[m")
+[35membed_version_documents.py[m[36m:[m[32m27[m[36m:[membedding = OpenAIEmbeddings(openai_api_key=[1;31mOPENAI_API_KEY[m)
+[35mtranslate/app/agent.py[m[36m:[m[32m14[m[36m:[mos.environ['[1;31mOPENAI_API_KEY[m'] = ''
+[35mtranslate/app/analyze_agent_crew.py[m[36m:[m[32m6[m[36m:[mos.environ['[1;31mOPENAI_API_KEY[m'] = ''
+[35mtranslate/app/consumer.py[m[36m:[m[32m9[m[36m:[mos.environ['[1;31mOPENAI_API_KEY[m'] = ''
+[35mtranslate/app/egov_agent.py[m[36m:[m[32m8[m[36m:[mos.environ['[1;31mOPENAI_API_KEY[m'] = ''
+[35mtranslate/app/egov_agent.py[m[36m:[m[32m27[m[36m:[m    llm=LLM(model="gpt-4o", temperature=0, api_key=os.environ['[1;31mOPENAI_API_KEY[m'])
+[35mtranslate/app/egov_tools.py[m[36m:[m[32m15[m[36m:[mos.environ['[1;31mOPENAI_API_KEY[m'] = ''
+[35mtranslate/app/python_agent.py[m[36m:[m[32m12[m[36m:[m[1;31mOPENAI_API_KEY[m = os.getenv("[1;31mOPENAI_API_KEY[m", "")
+[35mtranslate/app/python_agent.py[m[36m:[m[32m13[m[36m:[massert [1;31mOPENAI_API_KEY[m, "Missing [1;31mOPENAI_API_KEY[m (set in your env)"
+[35mtranslate/app/python_agent.py[m[36m:[m[32m14[m[36m:[mllm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=[1;31mOPENAI_API_KEY[m)
+[35mtranslate/app/python_agent.py[m[36m:[m[32m22[m[36m:[moai_client = OpenAI(api_key=[1;31mOPENAI_API_KEY[m)
+[35mtranslate/app/python_agent.py[m[36m:[m[32m23[m[36m:[mllm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=[1;31mOPENAI_API_KEY[m)
+[35mtranslate/app/test.py[m[36m:[m[32m14[m[36m:[mapi_key = os.getenv("[1;31mOPENAI_API_KEY[m")
+[35mtranslate/kubernetes/deployment.yml[m[36m:[m[32m31[m[36m:[m          #   - name: [1;31mOPENAI_API_KEY[m
+[35mupgrade_version/embed_version_documents.py[m[36m:[m[32m11[m[36m:[m[1;31mOPENAI_API_KEY[m = os.getenv("[1;31mOPENAI_API_KEY[m")
+[35mupgrade_version/embed_version_documents.py[m[36m:[m[32m27[m[36m:[membedding = OpenAIEmbeddings(openai_api_key=[1;31mOPENAI_API_KEY[m)
+[35mupgrade_version/version_transform1.py[m[36m:[m[32m10[m[36m:[m# 환경변수 로드 (.env에서 [1;31mOPENAI_API_KEY[m)
+[35mupgrade_version/version_transform1.py[m[36m:[m[32m14[m[36m:[membedding = OpenAIEmbeddings(openai_api_key=os.getenv("[1;31mOPENAI_API_KEY[m"))
+[35mupgrade_version/version_upgrade_agent.py[m[36m:[m[32m13[m[36m:[m1) [1;31mOPENAI_API_KEY[m (.env 또는 환경 변수)
+[35mupgrade_version/version_upgrade_agent.py[m[36m:[m[32m49[m[36m:[m    if not os.getenv("[1;31mOPENAI_API_KEY[m"):
+[35mupgrade_version/version_upgrade_agent.py[m[36m:[m[32m51[m[36m:[m            "[1;31mOPENAI_API_KEY[m가 설정되지 않았습니다. .env 또는 환경 변수로 설정해 주세요."
+[35mversion_transform1.py[m[36m:[m[32m10[m[36m:[m# 환경변수 로드 (.env에서 [1;31mOPENAI_API_KEY[m)
+[35mversion_transform1.py[m[36m:[m[32m14[m[36m:[membedding = OpenAIEmbeddings(openai_api_key=os.getenv("[1;31mOPENAI_API_KEY[m"))
+[35mversion_upgrade_agent.py[m[36m:[m[32m13[m[36m:[m1) [1;31mOPENAI_API_KEY[m (.env 또는 환경 변수)
+[35mversion_upgrade_agent.py[m[36m:[m[32m49[m[36m:[m    if not os.getenv("[1;31mOPENAI_API_KEY[m"):
+[35mversion_upgrade_agent.py[m[36m:[m[32m51[m[36m:[m            "[1;31mOPENAI_API_KEY[m가 설정되지 않았습니다. .env 또는 환경 변수로 설정해 주세요."
