@@ -2,9 +2,9 @@ from dotenv import load_dotenv
 import os
 from confluent_kafka import Consumer, KafkaException
 import json
-from log import Logger
-from agent import call_agent
-from producer import MessageProducer
+from orchestrate.app.log import Logger
+from orchestrate.app.agent import call_agent
+from orchestrate.app.producer import MessageProducer
 load_dotenv()
 
 class MessageConsumer:

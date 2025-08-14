@@ -1,8 +1,8 @@
 from dotenv import load_dotenv
 import os
-from confluent_kafka import Producer, KafkaException
+from confluent_kafka import Producer
 import json
-from log import Logger
+from orchestrate.app.log import Logger
 
 load_dotenv()
 
