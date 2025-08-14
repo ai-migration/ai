@@ -48,7 +48,7 @@ class MessageConsumer:
             request = json.loads(message.value().decode('utf-8'))
 
             self.logger.info(f"{message.topic()} | key: {message.key()} | value: {request}")
-            self.conversion_agent.run(request['user_id'], request['job_id'], r"C:\Users\User\Desktop\dev\project\0811test.zip")
+            self.conversion_agent.run(request['user_id'], request['job_id'], request['file_path'])
 
         except Exception as e:
             self.logger.exception(e)

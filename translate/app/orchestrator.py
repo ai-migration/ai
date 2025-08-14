@@ -49,7 +49,7 @@ def run_analysis(user_id, job_id, input_path: str, extract_dir: str) -> Dict[str
         description = '프로젝트 구조 분석이 실패되었습니다.'
     finally:
         producer.send_message(topic='agent-res', 
-                              message={'userId': user_id, 'job_id': job_id, 'language': summary['language'], 'status': status, 'description': description},
+                              message={'userId': user_id, 'jobId': job_id, 'language': summary['language'], 'status': status, 'description': description},
                               headers=[('AGENT', 'ANALYSIS')])
     return summary
 
@@ -64,7 +64,7 @@ def py_to_java(user_id, job_id) -> Dict[str, Any]:
         description = '파이썬을 자바로 변환 실패되었습니다.'
     finally:
         producer.send_message(topic='agent-res', 
-                              message={'userId': user_id, 'job_id': job_id, 'status': status, 'description': description},
+                              message={'userId': user_id, 'jobId': job_id, 'status': status, 'description': description},
                               headers=[('AGENT', 'PYTHON')])
 
 def java_to_egov(user_id, job_id) -> Dict[str, Any]:
@@ -80,7 +80,7 @@ def java_to_egov(user_id, job_id) -> Dict[str, Any]:
         description = '전자정부표준프레임워크 변환 실패되었습니다.'
     finally:
         producer.send_message(topic='agent-res', 
-                              message={'userId': user_id, 'job_id': job_id, 'status': status, 'description': description},
+                              message={'userId': user_id, 'jobId': job_id, 'status': status, 'description': description},
                               headers=[('AGENT', 'EGOV')])
         
 def validate_fix(outdir: str) -> Dict[str, Any]:
