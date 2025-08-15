@@ -9,3 +9,5 @@ langchain_core
 langchain-community
 confluent-kafka
 python-dotenv
+crewai
+crewai-tools

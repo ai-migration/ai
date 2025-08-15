@@ -1,117 +1,230 @@
-from crewai import Agent, Task, Crew, LLM
-from pydantic import BaseModel
-from typing import Dict, Any
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langgraph.graph import StateGraph, START, END
+from langchain.vectorstores import FAISS
+from langchain_core.output_parsers import JsonOutputParser
 
-from translate.app.egov_tools import CheckCompletedTool, ConversionTool, ProduceTool, State
-import os, json
+from translate.app.states import ConversionEgovState
+from translate.app.producer import MessageProducer
+from translate.app.prompts import controller_template, service_prompt, serviceimpl_prompt, vo_prompt
 
-os.environ['OPENAI_API_KEY'] = ''
+import json
+import os
 
-produce = ProduceTool()
-eval = CheckCompletedTool()
-conversion_loop = ConversionTool(evaluator=eval)
+LLM = 'gpt-4o'
+EMBEDDING = 'text-embedding-3-small'
+DB_PATH = r'C:\Users\User\Desktop\dev\project\eGovCodeDB_0805'
 
-egov_conv_agent = Agent(
-    role="Egov Converter",
-    goal="분석 단계에서 생성된 보고서를 바탕으로 전자정부프레임워크(eGovFrame) 스타일에 맞춰 Controller, Service, ServiceImpl, VO 코드를 변환하고, 변환 결과를 보고서와 함께 제공한다.",
-    backstory=(
-        "나는 수많은 프로젝트를 전자정부프레임워크 표준에 맞게 변환해온 숙련된 변환 전문가다. "
-        "분석팀이 넘겨준 코드 구조와 예제 코드를 바탕으로, "
-        "각 계층별 규칙과 모범 사례를 철저히 준수하며 코드를 변환한다. "
-        "Controller부터 VO까지 모든 계층이 일관된 구조와 품질을 유지하도록 하고, "
-        "변환 과정에서 생성된 보고서를 통해 다른 개발자들이 변경 내용을 쉽게 이해할 수 있도록 돕는다."
-    ),
-    tools=[conversion_loop, produce],
-    memory=False,
-    verbose=True,
-    llm=LLM(model="gpt-4o", temperature=0, api_key=os.environ['OPENAI_API_KEY'])
-)
+class ConversionEgovAgent:
+    def __init__(self):
+        self.llm = ChatOpenAI(model=LLM, temperature=0)
+        self.embedding =  OpenAIEmbeddings(model=EMBEDDING)
+        vectordb = FAISS.load_local(DB_PATH, embeddings=self.embedding, allow_dangerous_deserialization=True)
+        self.retriever = vectordb.as_retriever(search_kwargs={"k": 3})
+        self.producer = MessageProducer()
 
-conversion_task = Task(
-    description=(
-        "입력된 state의 내용:\n"
-        "{state}\n\n"
-        "orchestrate_loop(state=state)만 정확히 한 번 호출하고, "
-        "반환된 최신 state(dict)만 출력하라."
-    ),
-    agent=egov_conv_agent,
-    tools=[conversion_loop],
-    input_variables=["state"],
-    output_pydantic=State,
-    expected_output="최종 state(dict)"
-)
-
-# response_task = Task(
-#     description=(
-#         "이전 단계의 최종 state를 Kafka에 발행하라. "
-#         "produce_to_kafka 도구를 사용한다. "),
-#     agent=egov_conv_agent,
-#     tools=[produce],
-#     context=[conversion_task],
-#     expected_output="최종 분석 결과를 kafka로 메세지 발행"
-# )
-
-egov_crew = Crew(
-    agents=[egov_conv_agent],
-    tasks=[conversion_task],
-    verbose=True, memory=False
-)
-
-def init_state(path):
-    '''
-    [
-        {
-            "board": {
-                "controller": [
-                    "code",
-                ],
-                "service": [
-                    "code",
-                ]
+    def init_state(self, user_id, job_id, path='output/java_analysis_results.json'):
+        '''
+        [
+            {
+                "board": {
+                    "controller": [
+                        "code",
+                    ],
+                    "service": [
+                        "code",
+                    ]
+                }
             }
-        }
-    ]
-    '''
-    state = {
-                'controller': [],
-                'service': [],
-                'serviceimpl': [],  
-                'vo': [],
+        ]
+        '''
+        state = {
+                    'user_id': user_id,
+                    'job_id': job_id,
+                    'controller': [],
+                    'service': [],
+                    'serviceimpl': [],  
+                    'vo': [],
 
-                'controller_egov': [],
-                'service_egov': [],
-                'serviceimpl_egov': [],
-                'vo_egov': [],
+                    'controller_egov': [],
+                    'service_egov': [],
+                    'serviceimpl_egov': [],
+                    'vo_egov': [],
 
-                'controller_report': {},
-                'service_report': {},
-                'serviceimpl_report': {},
-                'vo_report': {},
-                'retrieved': [],
-                'next_role': '',
-                'next_step': ''
-            }
+                    'controller_report': {},
+                    'service_report': {},
+                    'serviceimpl_report': {},
+                    'vo_report': {},
+                    'retrieved': [],
+                    'next_role': '',
+                    'next_step': ''
+                }
 
-    with open(path, encoding='utf-8') as f:
-        data = json.load(f)
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
 
-        for feature in data:
-            for f, role2code in feature.items():
-                for role, codes in role2code.items():
-                    state[role] = codes
-                    
-    return state
+            for feature in data:
+                for f, role2code in feature.items():
+                    for role, codes in role2code.items():
+                        state[role] = codes
+                        
+        return state
 
-# 2️⃣ 에이전트 실행 함수
-def run_egov_agent(path='output/java_analysis_results.json') -> Dict[str, Any]:
-    state = init_state(path)
-    result = egov_crew.kickoff(inputs={"state": state})
-    return result
+    def is_finished(self, state):
+        roles = ['controller', 'service', 'serviceimpl', 'vo']
+        for role in roles:
+            raw_cnt = len(state.get(role, []) or [])
+            conv_cnt = len(state.get(f"{role}_egov", []) or [])
+            if raw_cnt > conv_cnt:  # 아직 변환할 대상이 남아있음
+                state['next_step'] = 'continue'
+                return state
+        state['next_step'] = 'completed'
 
-# 3️⃣ CLI 실행 진입점
-if __name__ == '__main__':
-    result = run_egov_agent()
-    print("[✅ 완료] 최종 상태:", result)
+        print('1️⃣ 완성 여부 체크:', state['next_step'])
+        return state
     
-    with open("./test.json", 'w', encoding='utf-8') as f:
-        json.dump(result.tasks_output[-1].pydantic.model_dump(), f, ensure_ascii=False, indent=2)
+    def next_processing(self, state):
+        roles = ['controller','service','serviceimpl','vo']
+
+        for role in roles:
+            if state[role] and len(state[role]) != len(state[f"{role}_egov"]):
+                state['next_role'] = role
+                state['next_step'] = 'continue'
+                return state
+            
+        state['next_step'] = 'completed'
+                
+        print(f"2️⃣ 모든 계층 변환 완료")
+        return state 
+
+    def search_egov_code(self, state):
+        print(f"3️⃣ 유사 코드 검색")
+        role = state.get('next_role')
+    
+        if not role:
+            return state
+
+        results = []
+        for code in state.get(role, []):
+            query = f"[description]\n[role]{role}\n[code]{code}"
+            docs = self.retriever.get_relevant_documents(query)
+            cands = [d.page_content.split('[code]')[-1] for d in docs if d.metadata.get('type','').lower()==role]
+            results.append(cands[0] if cands else "")
+        
+        state['retrieved'] = results
+
+        return state
+    
+    def converse_code(self, state):
+        '''
+        변환 출력 포맷은 prompttemplate 확인
+        '''
+        parser = JsonOutputParser()
+
+        role = state['next_role']
+        print(f"4️⃣ {role} 계층 변환 및 생성:")
+        
+        if role == 'controller':
+            chain = controller_template | self.llm | parser
+
+            for idx, code in enumerate(state[role]):
+                res = chain.invoke({'INPUT_CONTROLLER_CODE': code,
+                                    'INPUT_SERVICE_CODE': '\n'.join(f'=== Service class {i+1} ===\n{code}' for i, code in enumerate(state['service'])) if state['service'] else '',
+                                    'EGOV_EXAM_CODE': state['retrieved'][idx]})
+                
+                state['controller_egov'].append(res['Controller']['code'])
+                state['controller_report']['conversion'] = res['Controller']['report']
+
+                if not state['service']:
+                    state['service'].append(res['Service']['code'])
+                    state['service_report']['generate'] = res['Service']['report']
+
+                if not state['vo']:
+                    state['vo'].append(res['VO']['code'])
+                    state['vo_report']['generate'] = res['VO']['report']
+        
+        if role == 'service':
+            chain = service_prompt | self.llm | parser
+
+            for idx, code in enumerate(state[role]):
+                res = chain.invoke({'INPUT_SERVICE_CODE': code,
+                                    'INPUT_CONTROLLER_CODE': '\n'.join(f'=== Controller class {i+1} ===\n{code}' for i, code in enumerate(state['controller'])) if state['controller'] else '',
+                                    'EGOV_EXAM_CODE': state['retrieved'][idx]})
+                
+                state['service_egov'].append(res['Service']['code'])
+                state['service_report']['conversion'] = res['Service']['report']
+                
+                if not state['serviceimpl']:
+                    state['serviceimpl'].append(res['ServiceImpl']['code'])
+                    state['serviceimpl_report']['generate'] = res['ServiceImpl']['report']
+        
+        if role == 'serviceimpl':
+            chain = serviceimpl_prompt | self.llm | parser
+
+            for idx, code in enumerate(state[role]):
+                res = chain.invoke({'INPUT_SERVICEIMPL_CODE': code,
+                                    'EGOV_EXAM_CODE': state['retrieved'][idx]})
+
+                state['serviceimpl_egov'].append(res['ServiceImpl']['code'])
+                state['serviceimpl_report']['conversion'] = (res['ServiceImpl']['report'])
+        
+        if role == 'vo':
+            chain = vo_prompt | self.llm | parser
+
+            for idx, code in enumerate(state[role]):
+                res = chain.invoke({'INPUT_DTO_CODE': code,
+                                    'EGOV_EXAM_CODE': state['retrieved'][idx]})
+
+                state['vo_egov'].append(res['VO']['code'])
+                state['vo_report']['conversion'] = res['VO']['report']
+
+        self.producer.send_message(topic='agent-res', 
+                                    message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크의 {role} 계층 코드 변환이 완료되었습니다."},
+                                    headers=[('AGENT', 'EGOV')])
+        
+        return state
+
+    def build_graph(self):
+        builder = StateGraph(ConversionEgovState) 
+
+        builder.add_node('complete', self.is_finished)
+        builder.add_node('next', self.next_processing)
+        builder.add_node('rag', self.search_egov_code)
+        builder.add_node('conversion', self.converse_code)
+
+        builder.add_edge(START, 'complete')
+        builder.add_conditional_edges('complete', lambda state: state['next_step'], {'completed': END, 'continue': 'next'})
+        builder.add_edge('next', 'rag')
+        builder.add_edge('rag', 'conversion')
+        builder.add_edge('conversion', 'complete')
+
+        graph = builder.compile()
+        # print(graph.get_graph().draw_mermaid())
+        # graph.get_graph().draw_mermaid_png(output_file_path='egov_agent.png')
+        return graph
+
+if __name__ == '__main__':
+    # state = CoversionEgovState(input_path={'controller': [r'C:\Users\User\Desktop\dev\project\BoardController.java'],
+    #                                        'serviceimpl': [r'C:\Users\User\Desktop\dev\project\BoardService.java'],
+    #                                        'vo': [r'C:\Users\User\Desktop\dev\project\BoardUpdateDto.java']},
+    #                             controller=[],
+    #                             controller_egov=[],
+    #                             service=[],
+    #                             service_egov=[],
+    #                             serviceimpl=[],
+    #                             serviceimpl_egov=[],
+    #                             vo=[],
+    #                             vo_egov=[],
+    #                             validate='',
+    #                             retrieved=[],
+    #                             next_role='',
+    #                             next_step='',
+    #                             controller_report={},
+    #                             service_report={},
+    #                             serviceimpl_report={},
+    #                             vo_report={})
+    agent = ConversionEgovAgent()
+    state = agent.init_state(1, 1)
+    graph = agent.build_graph()
+    result = graph.invoke(state)
+    with open('testest.json', 'w', encoding='utf-8') as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)

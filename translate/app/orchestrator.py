@@ -9,7 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 # --- 에이전트 ---
 from translate.app.analyze_agent import AnalysisAgent
 from translate.app.python_agent import run_python_agent
-from translate.app.egov_agent import run_egov_agent  # 위에서 만든 함수
+from translate.app.egov_agent import ConversionEgovAgent
 from translate.app.producer import MessageProducer
 
 SYSTEM = "너는 코드 마이그레이션 수퍼바이저다. 목표를 달성할 때까지 적절한 도구를 순차적으로 호출하라."
@@ -34,6 +34,10 @@ producer = MessageProducer()
 
 def run_analysis(user_id, job_id, input_path: str, extract_dir: str) -> Dict[str, Any]:
     try:
+        producer.send_message(topic='agent-res', 
+                              message={'userId': user_id, 'jobId': job_id, 'description': '프로젝트 구조 분석을 시작합니다.'},
+                              headers=[('AGENT', 'ANALYSIS')])
+        
         graph = AnalysisAgent().build_graph()
         state = {"input_path": input_path, "extract_dir": extract_dir}
         final_state = graph.invoke(state)
@@ -55,6 +59,10 @@ def run_analysis(user_id, job_id, input_path: str, extract_dir: str) -> Dict[str
 
 def py_to_java(user_id, job_id) -> Dict[str, Any]:
     try:
+        producer.send_message(topic='agent-res', 
+                              message={'userId': user_id, 'jobId': job_id, 'description': '언어 변환을 시작합니다.'},
+                              headers=[('AGENT', 'PYTHON')])
+        
         run_python_agent(limit=2)
         status = 'SUCCESS'
         description = '파이썬을 자바로 변환 완료되었습니다.'
@@ -69,9 +77,18 @@ def py_to_java(user_id, job_id) -> Dict[str, Any]:
 
 def java_to_egov(user_id, job_id) -> Dict[str, Any]:
     try:
-        result = run_egov_agent()
+        producer.send_message(topic='agent-res', 
+                              message={'userId': user_id, 'jobId': job_id, 'description': '전자정부표준프레임워크 변환을 시작합니다.'},
+                              headers=[('AGENT', 'EGOV')])
+        
+        egov_agent = ConversionEgovAgent()
+        graph = egov_agent.build_graph()
+        state = egov_agent.init_state(user_id, job_id)
+        final_state = graph.invoke(state)
+        
         with open("output/conversion_result.json", 'w', encoding='utf-8') as f:
-            json.dump(result.tasks_output[-1].pydantic.model_dump(), f, ensure_ascii=False, indent=2)
+            json.dump(final_state, f, ensure_ascii=False, indent=2)
+        
         status = 'SUCCESS'
         description = '전자정부표준프레임워크 변환 완료되었습니다.'
     except Exception as e:

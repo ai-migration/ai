@@ -20,7 +20,9 @@ class State(TypedDict, total=False):
     java_analysis: Annotated[List[dict], operator.add]          # Java feature별 매핑
     report_files:  Annotated[List[str],  operator.add]          # 산출물 경로 누적
 
-class CoversionEgovState(TypedDict, total=False):
+class ConversionEgovState(TypedDict, total=False):
+    user_id: int
+    job_id: int
     input_path: dict
     controller: List[dict]
     controller_egov: List[dict]
