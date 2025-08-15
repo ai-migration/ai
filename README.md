@@ -1,45 +1,20 @@
-# ai
+0814 기준 테스트 방식 및 로직
 
-메인 에이전트 설명
- 
-패키지 단위로 실행(그래서 import를 좀 변경 했습니다):  python -m translate.app.orchestrator   다른 각각의 에이전트 체크시   python -m translate.app.egov_agent 이런식으로 하시면 각각 툴 에이전트 확인 가능하실겁니다 
+api를 사용하려면 http://localhost:8084/agents/conversion 사용 -> 자세한 방식은 노션에 있음
 
-orchestrator.py 가 메인 에이전트
+- API로 테스트하는 방법
+    http://localhost:8084/agents/conversion 사용 -> 자세한 방법은 노션에 있음
+- 명령어로 실행하는 방법
+    1. ai\orchestrate\app\main.py 실행
+        - 에이전트 실행 끝난 후 완료 메세지를 받기 위함
+    2. ~/ai 경로에서 ```python -m translate.app.orchestrator``` 실행
 
-from translate.app.agent_analyze_test import AnalysisTestAgent
+- 실행 결과
+    - 명령어를 실행한 경로에 output 폴더가 생성됨
+        생성되는 파일: java_analysis_results.json (언어가 자바인 경우)
+                    conversion_result.json
 
-from translate.app.python_agent import run_python_agent
-
-from translate.app.egov_agent import run_egov_agent  
-
-위의 3가지 툴을 사용
-
-카프카의 경우 정확히 어떻게 설계 되고 있는지 모르겠지만 
-
-def run_analysis(input_path: str, extract_dir: str) -> Dict[str, Any]:
-
-    graph = AnalysisTestAgent().build_graph()
-    state = {"input_path": input_path, "extract_dir": extract_dir}
-    final_state = graph.invoke(state)
-    summary = {
-        "language": final_state.get("language"),
-        "converted": bool(final_state.get("classes")) or bool(final_state.get("controller_code"))
-    }
-    return summary
-
-def py_to_java(outdir: str) -> Dict[str, Any]:
-
-    return run_python_agent(limit=2)
-
-def java_to_egov() -> Dict[str, Any]:
-
-    return run_egov_agent()
-
-이 3가지 함수에 카프카 설정을 하면 좋을거 같습니다 지금 리턴을 바로 에이전트에 주는 방식인데
-
-def py_to_java(outdir: str) -> Dict[str, Any]:
-
-    result=run_python_agent(limit=2)
-    return  result  
-
-이런식으로 하면 각각 최종 스테이트 확인 가능합니다.
+### 추후 작업 사항
+- 백엔드에서 output 경로 받아서 S3에 저장하고 output 폴더 삭제
+- 맨 처음 경로 입력 시 S3에 있는 zip의 경로를 넘겨주고 그 경로에서 파일 읽기 (분석 에이전트에서)
+- 리포트 자세하게
