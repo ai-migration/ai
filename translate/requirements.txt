@@ -11,3 +11,6 @@ confluent-kafka
 python-dotenv
 crewai
 crewai-tools
+faiss-cpu
+openai
+boto3

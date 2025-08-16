@@ -65,6 +65,7 @@ class ConversionEgovAgent:
             for feature in data:
                 for f, role2code in feature.items():
                     for role, codes in role2code.items():
+                        if role == 'dto': role = 'vo'
                         state[role] = codes
                         
         return state

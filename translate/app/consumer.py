@@ -6,8 +6,6 @@ from translate.app.log import Logger
 from translate.app.producer import MessageProducer
 from translate.app.orchestrator import ConversionAgent
 
-os.environ['OPENAI_API_KEY'] = ''
-
 load_dotenv()
 
 class MessageConsumer:
