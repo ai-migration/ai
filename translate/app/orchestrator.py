@@ -1,10 +1,39 @@
-# supervisor_agent.py
+# orchestrator.py
 import json, tempfile, shutil, os
 from typing import Dict, Any
 from langchain.tools import StructuredTool
 from langchain_openai import ChatOpenAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
+
+import os, tempfile
+from urllib.parse import urlparse
+import requests
+import boto3
+
+def _is_s3_uri(p): return isinstance(p, str) and p.startswith("s3://")
+def _is_http_uri(p): return isinstance(p, str) and (p.startswith("http://") or p.startswith("https://"))
+def _parse_s3_uri(uri): o=urlparse(uri); return o.netloc, o.path.lstrip('/')
+
+def _download_s3_to(dir_path: str, s3_uri: str) -> str:
+    os.makedirs(dir_path, exist_ok=True)
+    bucket, key = _parse_s3_uri(s3_uri)
+    local_zip = os.path.join(dir_path, os.path.basename(key) or "input.zip")
+    boto3.client("s3").download_file(bucket, key, local_zip)
+    return local_zip
+
+def _download_http_to(dir_path: str, url: str) -> str:
+    # 프리사인 URL 포함 모든 http(s) 다운로드
+    os.makedirs(dir_path, exist_ok=True)
+    local_zip = os.path.join(dir_path, "input.zip")
+    with requests.get(url, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(local_zip, "wb") as f:
+            for chunk in r.iter_content(8192):
+                if chunk:
+                    f.write(chunk)
+    return local_zip
+
 
 # --- 에이전트 ---
 from translate.app.analyze_agent import AnalysisAgent
@@ -33,6 +62,7 @@ HUMAN = """
 producer = MessageProducer()
 
 def run_analysis(user_id, job_id, input_path: str, extract_dir: str) -> Dict[str, Any]:
+    summary = {"language": "unknown", "converted": False}
     try:
         producer.send_message(topic='agent-res', 
                               message={'userId': user_id, 'jobId': job_id, 'description': '프로젝트 구조 분석을 시작합니다.'},
@@ -143,9 +173,38 @@ class ConversionAgent:
     def run(self, user_id, job_id, input_path):
         outdir = f"{user_id}/{job_id}/conversed/"
         with tempfile.TemporaryDirectory() as tmp:
-            init_state = json.dumps({"user_id": user_id, "job_id": job_id, "input_path": input_path, "extract_dir": tmp, "outdir": outdir, "language": "unknown"}, ensure_ascii=False)
-            result = self.executor.invoke({"goal": "파이썬/자바 코드를 eGov 표준 구조로 자동 변환", "state": init_state})
-        
+            download_dir = os.path.join(tmp, "downloads")   # ZIP 저장
+            extract_dir  = os.path.join(tmp, "extracted")   # 압축 풀 위치(이것만 삭제)
+            os.makedirs(download_dir, exist_ok=True)
+            os.makedirs(extract_dir,  exist_ok=True)
+
+            # 원격 ZIP은 반드시 download_dir에 저장
+            if _is_s3_uri(input_path):
+                local_input = _download_s3_to(download_dir, input_path)
+            elif _is_http_uri(input_path):
+                local_input = _download_http_to(download_dir, input_path)
+            else:
+                local_input = input_path  # 로컬이면 그대로(단, extract_dir 안은 금지)
+
+            # 안전장치 + 디버그
+            print(f"[ORCH] __file__={__file__}")
+            print(f"[DEBUG] local_input={local_input}")
+            print(f"[DEBUG] extract_dir={extract_dir}")
+            assert os.path.isfile(local_input)
+
+            init_state = json.dumps({
+                "user_id": user_id,
+                "job_id": job_id,
+                "input_path": local_input,
+                "extract_dir": extract_dir,
+                "outdir": outdir,
+                "language": "unknown"
+            })
+            print("[ORCH] init_state:", init_state)
+            result = self.executor.invoke({
+                "goal": "파이썬/자바 코드를 eGov 표준 구조로 자동 변환",
+                "state": init_state
+            })
         return result
 
 if __name__ == "__main__":  

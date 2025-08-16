@@ -16,3 +16,6 @@ pandas
 numpy
 tqdm
 javalang
+crewai
+boto3
+requests

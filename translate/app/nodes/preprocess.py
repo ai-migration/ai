@@ -22,10 +22,25 @@ def preprocessing(state: State) -> State:
         state['code_files'] = []
         return state
 
+    abs_zip   = os.path.abspath(input_path)
+    abs_ext   = os.path.abspath(extract_dir)
+    try:
+        # ZIP이 extract_dir 내부(혹은 동일 폴더)에 있으면 True
+        in_same_or_under = os.path.commonpath([abs_zip, abs_ext]) == abs_ext
+    except Exception:
+        in_same_or_under = False
+
+    if in_same_or_under:
+        safe = os.path.join(abs_ext, "_work")
+        logging.info(f"[SAFE] adjust extract_dir -> {safe}")
+        os.makedirs(safe, exist_ok=True)
+        extract_dir = safe
+        state['extract_dir'] = extract_dir  # 이후 단계도 동일 값 사용
+
     try:
         extractor = FileExtractor(input_path, extract_dir)
         extractor.extract_zip()
-        raw = extractor.find_supported_code_files()  # dict 또는 tuple 혼용 가능
+        raw = extractor.find_supported_code_files()
 
         norm = []
         for it in (raw or []):
@@ -38,10 +53,8 @@ def preprocessing(state: State) -> State:
                     l = (l or '').strip().lower()
                 except Exception:
                     continue
-            if not p:
-                continue
-            # 가능하면 절대경로로 고정(분석 단계에서 파일 접근 안정)
-            norm.append((os.path.abspath(p), l))
+            if p:
+                norm.append((os.path.abspath(p), l))
 
         state['code_files'] = norm
         logging.info(f"Extracted to '{extract_dir}' and found {len(state['code_files'])} supported files.")
