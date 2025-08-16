@@ -40,7 +40,7 @@ def healthz():
     return {"ok": True}
 
 # ---------- RAG: Upload / Reindex / Search / List ----------
-ALLOWED_EXTS = {".txt", ".md", ".pdf"}
+ALLOWED_EXTS = {".txt", ".md", ".pdf",".docx"}
 UPLOAD_DIR = os.path.join(RAG.knowledge_dir, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 

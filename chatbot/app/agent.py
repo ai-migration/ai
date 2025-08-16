@@ -6,6 +6,13 @@ from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 load_dotenv()  # .env 로드
 
+# DOCX 텍스트 추출 (선택)
+try:
+    from docx import Document  # pip install python-docx
+except Exception:
+    Document = None
+
+
 # 선택 의존성
 try:
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -96,6 +103,26 @@ class SimpleRAG:
             return "\n".join(texts)
         except Exception:
             return ""
+    def _read_docx(self, path: str) -> str:
+        if Document is None:
+            return ""
+        try:
+            doc = Document(path)
+            parts = []
+            # 본문 문단
+            for p in doc.paragraphs:
+                if p.text:
+                    parts.append(p.text)
+            # 표 안의 텍스트도 수집(있다면)
+            for tbl in doc.tables:
+                for row in tbl.rows:
+                    for cell in row.cells:
+                        t = (cell.text or "").strip()
+                        if t:
+                            parts.append(t)
+            return "\n".join(parts)
+        except Exception:
+            return ""
 
     def _walk_knowledge(self) -> List[Tuple[str, str]]:
         """
@@ -113,6 +140,8 @@ class SimpleRAG:
                     text = self._read_txt_md(p)
                 elif low.endswith(".pdf"):
                     text = self._read_pdf(p)
+                elif low.endswith(".docx"):
+                    text = self._read_docx(p)                    
                 if text.strip():
                     out.append((f, text))
         return out
@@ -166,6 +195,9 @@ class SimpleRAG:
                 t = self._read_txt_md(p)
             elif low.endswith(".pdf"):
                 t = self._read_pdf(p)
+
+            elif low.endswith(".docx"):
+                t = self._read_docx(p)
             else:
                 continue
             if not t.strip():
@@ -209,7 +241,7 @@ def _build_llm():
     if ChatOpenAI is None:
         return None, "missing_langchain_openai"
     try:
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, api_key=OPENAI_API_KEY)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.6, api_key=OPENAI_API_KEY)
         return llm, "ok"
     except Exception as e:
         return None, f"init_error:{type(e).__name__}"
