@@ -6,6 +6,9 @@ from translate.app.analyzer.java_analyzer import JavaAnalyzer
 from translate.app.analyzer.xml_mapper_analyzer import XmlMapperAnalyzer
 from translate.app.analyzer.structure_mapper import StructureMapper
 from translate.app.analyzer.external_usage_detector import ExternalUsageDetector
+from translate.app.analyzer.java_lenient_fallback import extract_classes_lenient_from_text
+from translate.app.analyzer.python_lenient_fallback import extract_outline_from_text
+
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +19,12 @@ def _rel_to_module(rel_path: str) -> str:
     return ".".join([seg for seg in p.split("/") if seg])
 
 def _body_hash(obj: dict) -> str:
-    body = (obj.get("body") or "")
-    return hashlib.md5(body.encode("utf-8")).hexdigest()
+    body = obj.get("body")
+    if isinstance(body, (dict, list)):
+        s = json.dumps(body, ensure_ascii=False, sort_keys=True)
+    else:
+        s = "" if body is None else str(body)
+    return hashlib.md5(s.encode("utf-8")).hexdigest()
 
 IGNORE_SUBSTR = ("tests/", "migrations/", "migrations_test_apps/", "/docs/")
 def _skip(path: str) -> bool:
@@ -39,33 +46,35 @@ def analyze_python(state: State) -> State:
         source_info = {"zip_file": base_zip_name, "rel_path": rel_path, "language": lang}
 
         analyzer = PythonAnalyzer(file_path)
-        if not analyzer.is_parsed:
-            continue
+        if analyzer.is_parsed:
+            py_classes = analyzer.extract_classes()
+            py_funcs = analyzer.extract_functions()
+            code_text = analyzer.code
+        else:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                code_text = f.read()
+            py_classes, py_funcs = extract_outline_from_text(code_text)
 
-        # 외부 호출 탐지기
-        ext_detector = ExternalUsageDetector(analyzer.code)
+        ext_detector = ExternalUsageDetector(code_text)
         ext_tokens = ext_detector.detect()
         if isinstance(ext_tokens, (list, tuple, set)):
             ext_tokens = set(map(str, ext_tokens))
         else:
-            ext_tokens = None  # 안전 가드
+            ext_tokens = None
+
 
         # 함수
-        py_funcs = analyzer.extract_functions()
         for func in py_funcs:
             func['source_info'] = source_info
-            # 과탐 방지: extract_calls 타겟과 외부 토큰의 교집합
             if ext_tokens is not None:
                 call_targets = {c.get("target") for c in (func.get("calls") or []) if c.get("target")}
                 func['external_calls'] = sorted(call_targets & ext_tokens)
             else:
-                # fallback: 기존 부분 문자열 방식 (최소 보장)
                 body = func.get('body', '')
                 func['external_calls'] = [t for t in (ext_detector.detect() or []) if isinstance(t, str) and t in body]
             all_functions.append(func)
 
         # 클래스
-        py_classes = analyzer.extract_classes()
         for cls in py_classes:
             cls['source_info'] = source_info
             all_classes.append(cls)
@@ -150,10 +159,14 @@ def analyze_java(state: State) -> State:
         source_info = {"zip_file": base_zip_name, "rel_path": rel_path, "language": lang}
 
         analyzer = JavaAnalyzer(file_path, query_bank=query_bank)
-        if not analyzer.is_parsed:
-            continue
+        if analyzer.is_parsed:
+            classes = analyzer.extract_classes()
+        else:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                code_text = f.read()
+            classes = extract_classes_lenient_from_text(code_text)
 
-        for cls in analyzer.extract_classes():
+        for cls in classes:                      # 폴백/정상 공통 처리
             cls['source_info'] = source_info
             cls['role'] = mapper.infer_class_role(cls)
             all_classes.append(cls)
@@ -207,7 +220,10 @@ def analyze_java(state: State) -> State:
         if feature_set:
             # 보기 좋게 경로 오름차순 정렬(안정성)
             for r in feature_set:
-                feature_set[r] = sorted(feature_set[r])
+                feature_set[r] = sorted(
+                    feature_set[r],
+                    key=lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True) if isinstance(x, dict) else str(x)
+                )
             java_analysis_output.append({feature: feature_set})
 
     output_dir = "output"

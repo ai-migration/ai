@@ -95,7 +95,11 @@ class PythonAnalyzer:
                         _collect(node, class_name=class_node.name)
         return functions
 
-    def extract_calls(self, node):
+    def extract_calls(self, node=None):
+        if node is None:
+                node = self.tree
+        if not node:
+            return []
         calls = []
         for sub in ast.walk(node):
             if isinstance(sub, ast.Call):
