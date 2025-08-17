@@ -51,10 +51,10 @@ class MessageConsumer:
 
             self.logger.info(f"{message.topic()} | key: {message.key()} | value: {request}")
 
-            if message.topic() == 'backend':
+            if message.topic() == 'java-message':
                 call_agent(request)
             elif message.topic() == 'agent-res':
-                self.producer.send_message('java', request)
+                self.producer.send_message('python-message', request)
 
                 ## 에이전트 별로 처리가 필요할 때 사용
                 # if message.headers():
