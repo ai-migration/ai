@@ -10,7 +10,7 @@ class State(TypedDict):
 
 def call_agent(request):
     '''
-    request: {'C:\Users\User\Desktop\dev\project\ai\orchestrate\app\agent.pyeventType': 'ConversionRequested', 'timestamp': 1755069341605, 'jobId': None, 'userId': 11, 'filePath': None, 'inputeGovFrameVer': '3.8', 'outputeGovFrameVer': '3.10', 'isTestCode': True, 'conversionType': 'CODE'}
+    request: {'eventType': 'ConversionRequested', 'timestamp': 1755069341605, 'jobId': None, 'userId': 11, 'filePath': None, 'inputeGovFrameVer': '3.8', 'outputeGovFrameVer': '3.10', 'isTestCode': True, 'conversionType': 'CODE'}
     '''
     if request['eventType'] == 'ConversionRequested':
         producer.send_message('conversion', message=asdict(ToTranslator(job_id=request['jobId'],

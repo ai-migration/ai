@@ -90,18 +90,20 @@ def java_to_egov(user_id, job_id) -> Dict[str, Any]:
         state = egov_agent.init_state(user_id, job_id)
         final_state = graph.invoke(state)
         
-        with open("output/conversion_result.json", 'w', encoding='utf-8') as f:
-            json.dump(final_state, f, ensure_ascii=False, indent=2)
+        # with open("output/conversion_result.json", 'w', encoding='utf-8') as f:
+        #     json.dump(final_state, f, ensure_ascii=False, indent=2)
         
         status = 'SUCCESS'
         description = '전자정부표준프레임워크 변환 완료되었습니다.'
+        result = final_state
     except Exception as e:
         print(e)
         status = 'FAIL'
         description = '전자정부표준프레임워크 변환 실패되었습니다.'
+        result = {}
     finally:
         producer.send_message(topic='agent-res', 
-                              message={'userId': user_id, 'jobId': job_id, 'status': status, 'description': description},
+                              message={'userId': user_id, 'jobId': job_id, 'status': status, 'description': description, 'result': result},
                               headers=[('AGENT', 'EGOV')])
         
 def validate_fix(outdir: str) -> Dict[str, Any]:
