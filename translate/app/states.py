@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from typing_extensions import Annotated
 from typing import TypedDict
 import operator
@@ -26,16 +26,16 @@ class ConversionEgovState(TypedDict, total=False):
     input_path: dict
     controller: List[dict]
     controller_egov: List[dict]
-    controller_report: dict
+    controller_report: Dict[str, List[str]]
     service: List[dict]
     service_egov: List[dict]
-    service_report: dict
+    service_report: Dict[str, List[str]]
     serviceimpl: List[dict]
     serviceimpl_egov: List[dict]
-    serviceimpl_report: dict
+    serviceimpl_report: Dict[str, List[str]]
     vo: List[dict]
     vo_egov: List[dict]
-    vo_report: dict
+    vo_report: Dict[str, List[str]]
     retrieved: List[dict]
     validate: str
     next_role: str

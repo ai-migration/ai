@@ -55,10 +55,11 @@ class ConversionEgovAgent:
                     'serviceimpl_egov': [],
                     'vo_egov': [],
 
-                    'controller_report': {},
-                    'service_report': {},
-                    'serviceimpl_report': {},
-                    'vo_report': {},
+                    'controller_report': {'conversion': [], 'generation': []},
+                    'service_report': {'conversion': [], 'generation': []},
+                    'serviceimpl_report': {'conversion': [], 'generation': []},
+                    'vo_report': {'conversion': [], 'generation': []},
+
                     'retrieved': [],
                     'next_role': '',
                     'next_step': ''
@@ -162,15 +163,15 @@ class ConversionEgovAgent:
                                 'EGOV_EXAM_CODE': state['retrieved'][idx]})
             
             state['controller_egov'].append(res['Controller']['code'])
-            state['controller_report']['conversion'] = res['Controller']['report']
+            state['controller_report']['conversion'].append(res['Controller']['report'])
 
             if not state['service']:
                 state['service'].append(res['Service']['code'])
-                state['service_report']['generate'] = res['Service']['report']
+                state['service_report']['generation'].append(res['Service']['report'])
 
             if not state['vo']:
                 state['vo'].append(res['VO']['code'])
-                state['vo_report']['generate'] = res['VO']['report']
+                state['vo_report']['generation'].append(res['VO']['report'])
         
         self.producer.send_message(topic='agent-res', 
                                     message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크의 {role} 계층 코드 변환이 완료되었습니다."},
@@ -192,11 +193,11 @@ class ConversionEgovAgent:
                                 'EGOV_EXAM_CODE': state['retrieved'][idx]})
             
             state['service_egov'].append(res['Service']['code'])
-            state['service_report']['conversion'] = res['Service']['report']
+            state['service_report']['conversion'].append(res['Service']['report'])
             
             if not state['serviceimpl']:
                 state['serviceimpl'].append(res['ServiceImpl']['code'])
-                state['serviceimpl_report']['generate'] = res['ServiceImpl']['report']
+                state['serviceimpl_report']['generation'].append(res['ServiceImpl']['report'])
 
         self.producer.send_message(topic='agent-res', 
                                     message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크의 {role} 계층 코드 변환이 완료되었습니다."},
@@ -217,7 +218,7 @@ class ConversionEgovAgent:
                                 'EGOV_EXAM_CODE': state['retrieved'][idx]})
 
             state['serviceimpl_egov'].append(res['ServiceImpl']['code'])
-            state['serviceimpl_report']['conversion'] = (res['ServiceImpl']['report'])
+            state['serviceimpl_report']['conversion'].append(res['ServiceImpl']['report'])
 
         self.producer.send_message(topic='agent-res', 
                                     message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크의 {role} 계층 코드 변환이 완료되었습니다."},
@@ -238,7 +239,7 @@ class ConversionEgovAgent:
                                 'EGOV_EXAM_CODE': state['retrieved'][idx]})
 
             state['vo_egov'].append(res['VO']['code'])
-            state['vo_report']['conversion'] = res['VO']['report']
+            state['vo_report']['conversion'].append(res['VO']['report'])
 
         self.producer.send_message(topic='agent-res', 
                                     message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크의 {role} 계층 코드 변환이 완료되었습니다."},
