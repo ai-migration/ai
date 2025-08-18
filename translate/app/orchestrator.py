@@ -24,10 +24,7 @@ HUMAN = """
 
 규칙:
 - 중요!! 제일 먼저 run_analysis를 통해 집파일을 열어 분석할 코드본을 만들어주세요!!
-- state.language가 'python'이면 py_to_java(outdir) → validate_fix(outdir) → package_publish(outdir)
-- state.language가 'java'   이면 java_to_egov(input_paths) → validate_fix(outdir) → package_publish(outdir)
-- state.language가 'unknown'이면 우선 run_analysis(input_path, extract_dir)을 호출해 언어를 파악
-- 각 호출 후 state를 갱신하고, 완료되면 status='done'을 반환
+- 당신의 테스크는 위에서 나온 코드에서 state.language 각각의 변환을 통해 최종적으로 egov 표준프레임워크로 변환하는것입니다 명심해 주세요!
 
 필요한 도구를 골라 한 번에 하나씩 호출하라.
 완료 시 더는 도구를 호출하지 말고 JSON으로 status만 알려라.
@@ -106,22 +103,6 @@ def java_to_egov(user_id, job_id) -> Dict[str, Any]:
                               message={'userId': user_id, 'jobId': job_id, 'status': status, 'description': description, 'result': result},
                               headers=[('AGENT', 'EGOV')])
         
-def validate_fix(outdir: str) -> Dict[str, Any]:
-    must = [
-        "egovframework/com/cop/bbs/controller",
-        "egovframework/com/cop/bbs/service/impl",
-        "egovframework/com/cop/bbs/service",
-        "egovframework/com/cop/bbs/dao",
-        "egovframework/com/cop/bbs/mapper",
-        "egovframework/com/cop/bbs/vo",
-    ]
-    for d in must: os.makedirs(os.path.join(outdir, d), exist_ok=True)
-    return {"validated": True}
-
-def package_publish(outdir: str) -> Dict[str, Any]:
-    if os.path.exists(f"{outdir}.zip"): os.remove(f"{outdir}.zip")
-    shutil.make_archive(outdir, "zip", outdir)
-    return {"status": "done", "zip": f"{outdir}.zip"}
 
 class ConversionAgent:
     def __init__(self):
@@ -134,13 +115,8 @@ class ConversionAgent:
         self.java_to_egov_tool     = StructuredTool.from_function(name="java_to_egov",     
                                                                   func=lambda user_id, job_id: java_to_egov(user_id, job_id), 
                                                                   description="기존 Java를 eGov 스타일로 변환")
-        self.validate_fix_tool     = StructuredTool.from_function(name="validate_fix",     
-                                                                  func=lambda outdir: validate_fix(outdir), 
-                                                                  description="eGov 디렉토리 필수 트리/스켈레톤 보정")
-        self.package_publish_tool  = StructuredTool.from_function(name="package_publish",  
-                                                                  func=lambda outdir: package_publish(outdir), 
-                                                                  description="결과물 zip 생성 후 완료 상태 반환")
-        self.tools = [self.run_analysis_tool, self.py_to_java_tool, self.java_to_egov_tool, self.validate_fix_tool, self.package_publish_tool]
+
+        self.tools = [self.run_analysis_tool, self.py_to_java_tool, self.java_to_egov_tool]
         self.llm = ChatOpenAI(model="gpt-4o", temperature=0)
         self.prompt = ChatPromptTemplate.from_messages([("system", SYSTEM), ("human", HUMAN), ("placeholder","{agent_scratchpad}")])
         self.agent = create_tool_calling_agent(self.llm, self.tools, self.prompt)
@@ -186,4 +162,4 @@ class ConversionAgent:
 if __name__ == "__main__":  
     # r = run_analysis(1, 1, r"C:\Users\User\Desktop\dev\project\0811test.zip", './res')
     conv_agent = ConversionAgent()
-    conv_agent.run(1, 1, r"C:\Users\User\Desktop\dev\project\0811test.zip")
+    conv_agent.run(1, 1, r"C:\Users\rngus\ai-migration\ai\test\javatest.zip")

@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import shutil
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from openai import OpenAI
@@ -8,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain.tools import StructuredTool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
-
+from translate.app.analyze_agent import AnalysisAgent
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 assert OPENAI_API_KEY, "Missing OPENAI_API_KEY (set in your env)"
 llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=OPENAI_API_KEY)
@@ -22,9 +24,29 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=OPENAI_API_KEY)
 oai_client = OpenAI(api_key=OPENAI_API_KEY)
 llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=OPENAI_API_KEY)
 
+
+CANON = {"CONTROLLER", "SERVICE", "SERVICEIMPL", "VO"}
+ALIASES = {
+    "DTO": "VO",
+    "ENTITY": "VO",
+    "CONFIGURATION": None,
+    "UTIL": None,
+}
+def normalize_role(role: str) -> str | None:
+    if not role:
+        return None
+    r = role.strip().upper()
+    if r in CANON:
+        return r
+    return ALIASES.get(r, None)
+
+
+
 def build_prompt_with_usage(input_data: dict, target_code: str = None,
                             used: bool = False, used_index: int = None) -> str:
-    role = input_data.get("role", {}).get("type", "unknown").lower()
+    raw_role = input_data.get("role", {}).get("type", "unknown")
+    role_norm = normalize_role(raw_role) or "VO"
+    role = role_norm.lower()
     class_name = input_data.get("name", "UnknownClass")
     python_body = input_data.get("body", "")
     path = input_data.get("source_info", {}).get("rel_path", "unknown")
@@ -228,17 +250,12 @@ from typing import TypedDict, Optional
 from typing import TypedDict, List, Set
 # 상태 정의
 class JavaGenState(TypedDict):
-    input: dict  # 현재 처리 중인 Python 클래스 or 함수 정보
-
-    # 생성된 코드 저장 필드 (역할별, 모두 리스트 형태)
+    input: dict
     controller_code: List[str]
     service_code: List[str]
-    dto_code: List[str]
-    configuration_code: List[str]
-    util_code: List[str]
-    entity_code: List[str]
-
-    end: bool  # LangGraph 종료 조건
+    serviceimpl_code: List[str]
+    vo_code: List[str]
+    end: bool
 
 CLASSES: list[dict] = []
 
@@ -260,30 +277,33 @@ import json
 
 def generate_java_code_node(state: dict) -> dict:
     input_data = state["input"]
-    role_type = input_data.get("role", {}).get("type", "").upper()
+    raw_role = (input_data.get("role", {}) or {}).get("type", "")
+    # 필요 시 normalize_role 사용 (DTO/ENTITY→VO, CONFIGURATION/UTIL→None)
+    # 없는 경우라면 간단히 upper()만
+    role_type = normalize_role(raw_role) if 'normalize_role' in globals() else (raw_role or "").upper()
+    if role_type is None:
+        # CONFIGURATION/UTIL 등 생성 제외
+        return state
+    # ✅ state 내부에 정규화 결과를 직접 반영 (원본 업데이트)
+    if "role" not in input_data or not isinstance(input_data["role"], dict):
+        input_data["role"] = {}
+    input_data["role"]["type"] = role_type
 
-    # 역할별 저장 위치
     role_map = {
         "CONTROLLER": "controller_code",
         "SERVICE": "service_code",
-        "DTO": "dto_code",
-        "CONFIGURATION": "configuration_code",
-        "UTIL": "util_code",
-        "ENTITY": "entity_code",
+        "SERVICEIMPL": "serviceimpl_code",
+        "VO": "vo_code",
     }
+    key = role_map[role_type]
 
-    # key 미리 세팅 (없으면 util_code로)
-    key = role_map.get(role_type, "util_code")
-
-    # agent 입력 준비
-    role_key = input_data.get("role", {}).get("type", "").lower()
+    role_key = role_type.lower()  # controller/service/serviceimpl/vo
     agent_input = {
-        "input": input_data,
+        "input": state["input"],                 # ✅ 그대로 전달
         "role_code": state.get(f"{role_key}_code", []),
         "used": False,
-        "used_index": None
+        "used_index": None,
     }
-
     # agent 실행
     try:
         raw_result = agent_executor.invoke({"state": json.dumps(agent_input, ensure_ascii=False)})
@@ -292,10 +312,16 @@ def generate_java_code_node(state: dict) -> dict:
         raw_result = None
 
     raw_result=str(raw_result['output'])
+    match = re.search(r"'java':\s*(.*?)\s*,\s*'used_index'", raw_result, re.DOTALL)
+    if match:
+        java_code = match.group(1).strip()
+    else:
+        print("❌ Java 코드 추출 실패")
+
     fruits = re.search(r"['\"]java['\"]\s*:\s*((?:.|\n)*)", raw_result.strip())
     aa=re.search(r"['\"]used_index['\"]\s*:\s*((?:.|\n)*)", fruits[1])
     bb=aa[1].split("}")
-    java_code, used_index = fruits[1].strip(), bb[0].strip()
+    used_index = bb[0].strip()
 
     # 코드 저장
     bucket = state.setdefault(key, [])
@@ -314,43 +340,49 @@ def check_class_remaining_node(state: dict) -> dict:
     return state
 
 # --- 저장 노드 교정안 ---
-
-def _extract_java_class_name(code: str) -> str:
-    m = re.search(r"\bclass\s+([A-Za-z_]\w*)", code)
-    return m.group(1) if m else "Generated"
-
-def _ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
-
 def save_to_egov_tree_node(state: dict) -> dict:
     """
-    LangGraph 노드: state에 쌓인 역할별 Java 코드들을
-    eGov 디렉터리 트리에 일괄 저장한다. (state -> state)
+    state에 쌓인 역할별 Java 코드들을 eGov 디렉터리 트리에 저장하고,
+    프로젝트 전체를 ZIP으로 묶어 outputs/에 저장한다.
+    생성된 경로는 state['generated_project_root'], state['generated_zip_path']에 기록한다.
     """
+    import os
+    import re
+    import shutil
+    from datetime import datetime
+
+    def clean_java_code(raw_code: str) -> str:
+        """
+        문자열 형태로 감싸진 Java 코드를 정리 (따옴표 제거 + 이스케이프 복원)
+        """
+        if raw_code.startswith(("'", '"')) and raw_code.endswith(("'", '"')):
+            raw_code = raw_code[1:-1]
+        return raw_code.encode().decode("unicode_escape").strip()
+
+    def _extract_java_class_name(code: str) -> str:
+        m = re.search(r"\bclass\s+([A-Za-z_]\w*)", code)
+        return m.group(1) if m else "Generated"
+
+    def _ensure_dir(path: str):
+        os.makedirs(path, exist_ok=True)
+
     # 1) 출력 루트 결정
     outdir = state.get("outdir", "egov_generated_project")
 
-    # 2) 역할별 디렉터리 매핑 (필요시 SERVICEIMPL 추가)
+    # 2) 역할별 디렉터리 매핑 (4분류 고정)
     mapping = {
-        "CONTROLLER":   "egovframework/com/cop/bbs/controller",
-        "SERVICE":      "egovframework/com/cop/bbs/service",
-        "SERVICEIMPL":  "egovframework/com/cop/bbs/service/impl",
-        "DTO":          "egovframework/com/cop/bbs/vo",
-        "ENTITY":       "egovframework/com/cop/bbs/vo",
-        "CONFIGURATION":"egovframework/com/config",
-        "UTIL":         "egovframework/com/common/util",
+        "CONTROLLER":  "egovframework/com/cop/bbs/controller",
+        "SERVICE":     "egovframework/com/cop/bbs/service",
+        "SERVICEIMPL": "egovframework/com/cop/bbs/service/impl",
+        "VO":          "egovframework/com/cop/bbs/vo",
     }
 
     # 3) state 버킷 → role 매핑
     buckets = {
         "CONTROLLER":  state.get("controller_code", []),
         "SERVICE":     state.get("service_code", []),
-        "DTO":         state.get("dto_code", []),
-        "CONFIGURATION": state.get("configuration_code", []),
-        "UTIL":        state.get("util_code", []),
-        "ENTITY":      state.get("entity_code", []),
-        # 필요시 SERVICEIMPL 버킷도 추가:
         "SERVICEIMPL": state.get("serviceimpl_code", []),
+        "VO":          state.get("vo_code", []),
     }
 
     # 4) 일괄 저장
@@ -358,7 +390,7 @@ def save_to_egov_tree_node(state: dict) -> dict:
         if not code_list:
             continue
 
-        subdir = mapping.get(role, "egovframework/com/common/util")
+        subdir = mapping[role]
         target_dir = os.path.join(outdir, subdir)
         _ensure_dir(target_dir)
 
@@ -366,15 +398,41 @@ def save_to_egov_tree_node(state: dict) -> dict:
             if not isinstance(code, str) or not code.strip():
                 continue
 
-            class_name = _extract_java_class_name(code)
-            # 파일명: 클래스명 우선, 없으면 role+index
+            cleaned_code = clean_java_code(code)
+            class_name = _extract_java_class_name(cleaned_code)
             filename = f"{class_name}.java" if class_name else f"{role.title()}{idx+1}.java"
             path = os.path.join(target_dir, filename)
 
             with open(path, "w", encoding="utf-8") as f:
-                f.write(code)
+                f.write(cleaned_code)
 
-    # 저장 후 state 그대로 반환 (필요시 저장 경로 목록도 추가 가능)
+    # 5) ZIP으로 묶어 outputs/에 저장
+    outputs_dir = state.get("outputs_dir", "output")
+    os.makedirs(outputs_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_path = os.path.join(outputs_dir, f"egov_generated_project.zip")
+    root_no_ext, _ = os.path.splitext(zip_path)
+    shutil.make_archive(root_no_ext, "zip", outdir)
+
+
+    return state
+
+
+def reanalyze_generated_java_node(state: dict) -> dict:
+    import tempfile, os
+    input_path = r"C:\Users\rngus\ai-migration\ai\output\egov_generated_project.zip"
+    print(input_path)
+    if not input_path or not os.path.exists(input_path):
+        print("⚠️ ZIP 경로가 없습니다.")
+        return state
+
+    try:
+        with tempfile.TemporaryDirectory() as extract_dir:
+            graph = AnalysisAgent().build_graph()
+            graph.invoke({"input_path": input_path, "extract_dir": extract_dir})
+    except Exception as e:
+        print(e)
+
     return state
 
 
@@ -388,25 +446,29 @@ builder.add_node("PopClass", pop_next_class_node)
 builder.add_node("GenerateJava", generate_java_code_node)
 builder.add_node("CheckRemaining", check_class_remaining_node)
 builder.add_node("SaveAll", save_to_egov_tree_node)
+builder.add_node("reanalyzejava", reanalyze_generated_java_node)
 
 # 시작점
 builder.set_entry_point("PopClass")
 
-# 순차적 연결
+# 순차 연결
 builder.add_edge("PopClass", "GenerateJava")
 builder.add_edge("GenerateJava", "CheckRemaining")
 
 # 조건 분기
 builder.add_conditional_edges(
     "CheckRemaining",
-    # 분기 기준
     lambda state: "end" if state.get("end") else "PopClass",
-    # 분기 결과
     {
-        "PopClass": "PopClass",  # 반복
-        "end": "SaveAll",              
+        "PopClass": "PopClass",
+        "end": "SaveAll"
     }
 )
+
+# 저장 후 → 재분석 → 종료
+builder.add_edge("SaveAll", "reanalyzejava")
+builder.add_edge("reanalyzejava", END)
+
 graph_executor = None
 
 def build_executor():
@@ -435,13 +497,11 @@ def run_python_agent(jsonl_path="output/classes.jsonl", limit=None):
 
     # 초기 상태 정의
     state = {
-        "input": {},  # 여기에 한 개씩 넣어야 함
+        "input": {},
         "controller_code": [],
         "service_code": [],
-        "dto_code": [],
-        "configuration_code": [],
-        "util_code": [],
-        "entity_code": [],
+        "serviceimpl_code": [],
+        "vo_code": [],
         "used": False,
         "used_index": None,
         "end": False,
