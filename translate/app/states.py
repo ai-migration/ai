@@ -40,3 +40,5 @@ class ConversionEgovState(TypedDict, total=False):
     validate: str
     next_role: str
     next_step: str
+    features: list
+    current_feature_idx: int
