@@ -20,9 +20,9 @@ class MessageProducer:
         else:
             self.logger.info(f"Produced event to {msg.topic()} | key: {msg.key()} | value: {json.loads(msg.value().decode('utf-8'))}")
             
-    def send_message(self, topic, message: dict):
+    def send_message(self, topic, message: dict, headers=None):
         message = json.dumps(message, ensure_ascii=False).encode('utf-8')
-        self.producer.produce(topic, value=message, callback=self.delivery_callback)
+        self.producer.produce(topic, value=message, headers=headers, callback=self.delivery_callback)
         self.producer.flush()
 
 if __name__ == '__main__':

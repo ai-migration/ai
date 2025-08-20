@@ -54,7 +54,7 @@ class MessageConsumer:
             if message.topic() == 'java-message':
                 call_agent(request)
             elif message.topic() == 'agent-res':
-                self.producer.send_message('python-message', request)
+                self.producer.send_message('python-message', request, headers=message.headers())
 
                 ## 에이전트 별로 처리가 필요할 때 사용
                 # if message.headers():
