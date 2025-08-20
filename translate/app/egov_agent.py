@@ -9,6 +9,8 @@ from translate.app.states import ConversionEgovState
 from translate.app.producer import MessageProducer
 from translate.app.prompts import controller_template, service_prompt, serviceimpl_prompt, vo_prompt
 from translate.app.utils import _advance_and_cleanup_finished_features, _is_feature_done, _cleanup_current_feature
+from translate.app.egov_evaluation import evaluation
+
 import json
 import os
 
@@ -56,10 +58,10 @@ class ConversionEgovAgent:
                     'serviceimpl_egov': [],
                     'vo_egov': [],
 
-                    'controller_report': {'conversion': [], 'generation': []},
-                    'service_report': {'conversion': [], 'generation': []},
-                    'serviceimpl_report': {'conversion': [], 'generation': []},
-                    'vo_report': {'conversion': [], 'generation': []},
+                    'controller_report': {'conversion': [], 'generation': [], 'evaluation': []},
+                    'service_report': {'conversion': [], 'generation': [], 'evaluation': []},
+                    'serviceimpl_report': {'conversion': [], 'generation': [], 'evaluation': []},
+                    'vo_report': {'conversion': [], 'generation': [], 'evaluation': []},
 
                     'retrieved': [],
                     'next_role': '',
@@ -102,14 +104,6 @@ class ConversionEgovAgent:
         state['retrieved'] = []
         _advance_and_cleanup_finished_features(state)
 
-        # roles = ['controller', 'service', 'serviceimpl', 'vo']
-
-        # for role in roles:
-        #     raw_cnt = len(state.get(role, []) or [])
-        #     conv_cnt = len(state.get(f"{role}_egov", []) or [])
-        #     if raw_cnt > conv_cnt:  # 아직 변환할 대상이 남아있음
-        #         state['next_step'] = 'continue'
-        #         return state
         if not state['features']:
             state['next_step'] = 'completed'
             print('0️⃣ 완성 여부 체크:', state['next_step'])
@@ -368,15 +362,23 @@ class ConversionEgovAgent:
         
         return state
     
-    def get_role_node(state):
-        role = state.get("next_role")
-        return {
-            'controller': 'convert_controller',
-            'service': 'convert_service',
-            'serviceimpl': 'convert_serviceimpl',
-            'vo': 'convert_vo'
-        }.get(role, 'complete')  # fallback
+    def evaluate_egovcode(self, state):
+        self.producer.send_message(topic='agent-res', 
+                                    message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크 변환 결과 검증을 시작합니다."},
+                                    headers=[('AGENT', 'EGOV')])
+        for k in ['controller_egov', 'service_egov', 'serviceimpl_egov', 'vo_egov']:
+            for i, code in enumerate(state.get(k, []) or []):
+                if code:
+                    data = {"group": k, "index": i, "code": code}
+                    result = evaluation({k: [data]})
+                    role = k.split('_')[0]
+                    state[f"{role}_report"]['evaluation'].append(result)
 
+        self.producer.send_message(topic='agent-res', 
+                                    message={'userId': state['user_id'], 'jobId': state['job_id'], 'status': 'SUCCESS', 'description': f"전자정부 표준 프레임워크 변환 결과 검증이 완료되었습니다."},
+                                    headers=[('AGENT', 'EGOV')])
+        return state
+    
     def build_graph(self):
         builder = StateGraph(ConversionEgovState) 
 
@@ -388,9 +390,10 @@ class ConversionEgovAgent:
         builder.add_node('converse_service', self.converse_service)
         builder.add_node('converse_serviceimpl', self.converse_serviceimpl)
         builder.add_node('converse_vo', self.converse_vo)
+        builder.add_node('evaluation', self.evaluate_egovcode)
 
         builder.add_edge(START, 'complete')
-        builder.add_conditional_edges('complete', lambda state: state['next_step'], {'completed': END, 'continue': 'next'})
+        builder.add_conditional_edges('complete', lambda state: state['next_step'], {'completed': 'evaluation', 'continue': 'next'})
         builder.add_edge('next', 'rag')
         builder.add_conditional_edges('rag', 
                                       lambda state: 'rerank' if any(len(item) > 0 for item in state.get('retrieved', [])) else state['next_role'], 
@@ -407,6 +410,7 @@ class ConversionEgovAgent:
         builder.add_edge('converse_service', 'complete')
         builder.add_edge('converse_serviceimpl', 'complete')
         builder.add_edge('converse_vo', 'complete')
+        builder.add_edge('evaluation', END)
 
         graph = builder.compile()
         # print(graph.get_graph().draw_mermaid())
@@ -418,5 +422,5 @@ if __name__ == '__main__':
     state = agent.init_state(1, 1)
     graph = agent.build_graph()
     result = graph.invoke(state, config={"recursion_limit": 1000})
-    with open('testest2.json', 'w', encoding='utf-8') as f:
+    with open('testest4.json', 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
