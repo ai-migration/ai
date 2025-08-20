@@ -2,8 +2,7 @@ from dotenv import load_dotenv
 import os
 from confluent_kafka import Consumer, KafkaException
 import json
-from log import Logger
-from agent import call_agent
+from security.app.log import Logger
 load_dotenv()
 
 class MessageConsumer:
@@ -43,7 +42,7 @@ class MessageConsumer:
 
             self.logger.info(f"{message.topic()} | key: {message.key()} | value: {request}")
             
-            call_agent(request)
+            # call_agent(request)
 
         except Exception as e:
             self.logger.exception(e)
