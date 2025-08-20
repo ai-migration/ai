@@ -1,0 +1,6 @@
+openai>=1.52.2,<2
+qdrant-client>=1.15.0
+tiktoken==0.7.0
+pydantic>=2.7,<3
+python-dotenv==1.0.1
+numpy>=1.26,<3
