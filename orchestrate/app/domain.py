@@ -12,4 +12,5 @@ class ToTranslator:
 
 @dataclass
 class ToAuditor:
-    id: int
+    user_id: int
+    job_id: int

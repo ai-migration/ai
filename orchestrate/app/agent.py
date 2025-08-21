@@ -21,7 +21,9 @@ def call_agent(request):
                                                                         is_test_code=request['isTestCode'],
                                                                         conversion_type=request['conversionType'])))
     elif request['eventType'] == 'SecurityRequested':
-        producer.send_message('security', asdict(ToAuditor(id=request['id'])))
+        producer.send_message('security', asdict(ToAuditor(
+                                                           user_id=request['userId'],
+                                                           job_id=request['jobId'])))
     elif request['eventType'] == 'ChatbotRequested':
         producer.send_message('chatbot', asdict(ToAuditor(id=request['id'])))
 
