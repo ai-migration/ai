@@ -16,7 +16,7 @@ import os
 
 LLM = 'gpt-4o'
 EMBEDDING = 'text-embedding-3-small'
-DB_PATH = r'C:\Users\User\Desktop\dev\project\eGovCodeDB_0805'
+DB_PATH = r'/vectordb/eGovCodeDB_0805'
 
 class ConversionEgovAgent:
     def __init__(self):

@@ -1,35 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: translator-agent
+  name: translate-agent
   labels:
-    app: translator-agent
+    app: translate-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: translator-agent
+      app: translate-agent
   template:
     metadata:
       labels:
-        app: translator-agent
+        app: translate-agent
     spec:
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+          effect: "NoSchedule"
       containers:
-        - name: translator-agent
-          image: leeyumin/translator-agent:test4
-          ports:
-            - containerPort: 8001
-          resources:
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
-          # env:
-          #   # 예: OpenAI API 키 사용 시
-          #   - name: OPENAI_API_KEY
-          #     valueFrom:
-          #       secretKeyRef:
-          #         name: openai-secret
-          #         key: api-key
+        - name: translate-agent
+          image: 324177727803.dkr.ecr.ap-northeast-2.amazonaws.com/ai_translate:0824
+          env:
+          - name: KAFKA_SERVER
+            value: "kafka:9092"
+          - name: OPENAI_API_KEY
+            value:
