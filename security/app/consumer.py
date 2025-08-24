@@ -2,8 +2,8 @@ from dotenv import load_dotenv
 import os
 from confluent_kafka import Consumer, KafkaException
 import json
-from log import Logger
-from agent import call_agent
+from security.app.log import Logger
+from security.app.producer import MessageProducer
 load_dotenv()
 
 class MessageConsumer:
@@ -19,6 +19,7 @@ class MessageConsumer:
                                     'auto.offset.reset': self.auto_offset_reset  # 처음 실행시 가장 마지막 offset부터
                                 })
         self.consumer.subscribe([self.topic])
+        self.producer = MessageProducer()
 
     def consume(self):
         try:
@@ -43,7 +44,8 @@ class MessageConsumer:
 
             self.logger.info(f"{message.topic()} | key: {message.key()} | value: {request}")
             
-            call_agent(request)
+            # call_agent(request)
+            self.producer.send_message('agent-res', {'test': '성공'}, headers=[('AGENT', 'SECU')])
 
         except Exception as e:
             self.logger.exception(e)

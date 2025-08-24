@@ -2,8 +2,9 @@ from dotenv import load_dotenv
 import os
 from confluent_kafka import Consumer, KafkaException
 import json
-from log import Logger
-from agent import call_agent, build_agent
+from orchestrate.app.log import Logger
+from orchestrate.app.agent import call_agent
+from orchestrate.app.producer import MessageProducer
 load_dotenv()
 
 class MessageConsumer:
@@ -16,9 +17,11 @@ class MessageConsumer:
         self.consumer = Consumer({
                                     'bootstrap.servers': self.broker,
                                     'group.id': self.group_id, # consumer의 id
-                                    'auto.offset.reset': self.auto_offset_reset  # 처음 실행시 가장 마지막 offset부터
+                                    'auto.offset.reset': self.auto_offset_reset,  # 처음 실행시 가장 마지막 offset부터
+                                    'max.poll.interval.ms': 1800000
                                 })
         self.consumer.subscribe([t for t in self.topic.split(',')])
+        self.producer = MessageProducer()
 
     def consume(self):
         try:
@@ -48,8 +51,24 @@ class MessageConsumer:
 
             self.logger.info(f"{message.topic()} | key: {message.key()} | value: {request}")
 
-            if message.topic() == 'backend':
+            if message.topic() == 'java-message':
                 call_agent(request)
+            elif message.topic() == 'agent-res':
+                print('!!!!!!!!!!!!!!!!!!!')
+                self.producer.send_message('python-message', request, headers=message.headers())
+
+                ## 에이전트 별로 처리가 필요할 때 사용
+                # if message.headers():
+                #     for header in message.headers():
+                #         key, value = header
+                #         value = value.decode('utf-8') if value else None
+                #         if (key, value) == ('AGENT', 'ANALYSIS'):
+                #             self.producer.send_message('java', request)
+                #         elif (key, value) == ('AGENT', 'EGOV'):
+                #             self.producer.send_message('java', request)
+                            
+                # with open("agent_test5.json", "w", encoding='utf-8') as json_file:
+                #     json.dump(request, json_file, ensure_ascii=False, indent=2)
 
         except Exception as e:
             self.logger.exception(e)

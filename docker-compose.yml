@@ -1,0 +1,22 @@
+networks:
+  kafka-net:
+    external: true 
+
+services:
+  orchestrate:
+    image: leeyumin/orchestrate:v1
+    container_name: orchestrate
+    environment:
+      KAFKA_SERVER: kafka:9092
+      OPENAI_API_KEY: 
+    networks: [kafka-net]
+
+  translate:
+    image: leeyumin/translate:v1
+    container_name: translate
+    environment:
+      KAFKA_SERVER: kafka:9092
+      OPENAI_API_KEY: 
+    volumes:
+      - "C:/Users/User/Desktop/dev/project/eGovCodeDB_0805:/vectordb/eGovCodeDB_0805"
+    networks: [kafka-net]

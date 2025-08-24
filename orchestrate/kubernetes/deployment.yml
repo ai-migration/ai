@@ -1,28 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: orchestrator-agent
+  name: orchestrate-agent
   labels:
-    app: orchestrator-agent
+    app: orchestrate-agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: orchestrator-agent
+      app: orchestrate-agent
   template:
     metadata:
       labels:
-        app: orchestrator-agent
+        app: orchestrate-agent
     spec:
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
+          effect: "NoSchedule"
       containers:
-        - name: orchestrator-agent
-          image: leeyumin/orchestrator-agent:test
-          ports:
-            - containerPort: 8000
-          resources:
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
-            requests:
-              cpu: "250m"
-              memory: "256Mi"
+        - name: orchestrate-agent
+          image: 324177727803.dkr.ecr.ap-northeast-2.amazonaws.com/ai_orchestrate:0824
+          env:
+          - name: KAFKA_SERVER
+            value: "kafka:9092"
+          - name: OPENAI_API_KEY
+            value: 
