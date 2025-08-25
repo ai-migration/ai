@@ -152,6 +152,7 @@ def run_security_pipeline(*,
     _upsert_properties(props, {
         "sonar.projectKey": pj_key,
         "sonar.host.url": url,
+        "sonar.token": token
         # 필요 시 다음도 주입 가능:
         # "sonar.sources": ".",
         # "sonar.sourceEncoding": "UTF-8",
