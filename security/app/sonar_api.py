@@ -179,7 +179,8 @@ def collect_and_write_agent_inputs(out_dir: str | Path):
 # ===== 메인 실행 =====
 if __name__ == "__main__":
     # 출력 폴더
-    out_dir = ensure_dir("outputs")
+    job_id = os.getenv("JOB_ID", "").strip()
+    out_dir = ensure_dir(Path("outputs") / (job_id if job_id else "") / "security_reports")
 
     print("📊 품질 게이트 상태:")
     qg = get_quality_gate_status()

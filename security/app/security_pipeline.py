@@ -5,11 +5,82 @@
 #       - sonar-scanner → sonar_api.py → run_refactor.py 순차 실행
 #       - 실행 결과 코드/메타 반환 
 
-import os, re, sys, subprocess
+import os, re, sys, subprocess, shutil, stat
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 from security.app.utils import prepare_workspace_from_input
 from dotenv import load_dotenv
+import json
+
+# 결과 수집 유틸 1
+def _read_json_if_exists(p: Path):
+    """존재하면 JSON 로드, 없으면 None."""
+    try:
+        return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
+    except Exception:
+        return None
+    
+# 결과 수집 유틸 2
+def _gather_security_result(outputs_dir: Path) -> dict:
+    """
+    역할: outputs/security_reports/ 하위 산출물을 백엔드가 S3에 올릴 수 있도록
+         하나의 dict(result)로 정리한다.
+    """
+    
+    reports = outputs_dir / "security_reports"
+    root    = outputs_dir
+    def load_first(name: str):
+        return (_read_json_if_exists(reports / name)
+                or _read_json_if_exists(root / name))
+    # def _read_both(fname: str):
+    #     """outputs/ 우선, 없으면 outputs/security_reports/ 에서 로드"""
+    #     return (_read_json_if_exists(base / fname)
+    #             or _read_json_if_exists(reports / fname))
+
+    # result: dict = {
+    #     "agentInputs": _read_both("agent_inputs.json"),
+    #     "metrics":     _read_both("metrics.json"),
+    #     "qualityGate": _read_both("quality_gate.json"),
+    #     "issues":      _read_both("sonarqube_issues_combined.json"),
+    #     "reportJson":  _read_json_if_exists(reports / "report.json"),  # report.json은 가이드 생성 후 reports에 존재
+    #     "markdowns": []
+    # }
+    result: dict = {
+        "agentInputs": None,   # outputs/agent_inputs.json
+        "metrics": None,       # outputs/metrics.json
+        "qualityGate": None,   # outputs/quality_gate.json
+        "issues": None,        # outputs/sonarqube_issues_combined.json
+        "reportJson": None,    # outputs/security_reports/report.json (있을 때)
+        "markdowns": []        # [{name, text}]
+    }
+    result["agentInputs"] = _read_json_if_exists(reports / "agent_inputs.json")
+    result["metrics"]     = _read_json_if_exists(reports / "metrics.json")
+    result["qualityGate"] = _read_json_if_exists(reports / "quality_gate.json")
+    result["issues"]      = _read_json_if_exists(reports / "sonarqube_issues_combined.json")
+    result["reportJson"]  = _read_json_if_exists(reports / "report.json")
+
+    if reports.exists():
+        for p in reports.glob("*.md"):
+            try:
+                result["markdowns"].append({"name": p.name, "text": p.read_text(encoding="utf-8")})
+            except Exception:
+                pass
+    return result
+
+def _on_rm_error(func, path, exc_info):
+    # Windows 읽기전용 파일 삭제 대응
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+def _cleanup_local(job_id: int):
+    base = Path(__file__).parent
+    targets = [
+        base / "workspace" / str(job_id),
+        base / "outputs" / str(job_id),  # ← 잡별 출력 폴더만 지움
+    ]
+    for t in targets:
+        if t.exists():
+            shutil.rmtree(t, onerror=_on_rm_error)
 
 def _upsert_properties(path: Path, kv: Dict[str, str]) -> None:
     """
@@ -108,17 +179,26 @@ def run_security_pipeline(*,
         details = ".scannerwork 미생성(로그 확인 필요)"
     checkpoints.append({"step": "sonar-scanner", "ok": str(scanner_ok).lower(), "details": details})
     if not scanner_ok:
-        return {
+        fail_outputs_dir = Path(__file__).parent / "outputs" / str(job_id)
+        ret = {
             "status": f"FAIL_SCAN({rc})",
             "exitCode": rc,
             "projectKey": pj_key,
             "projectRootPath": str(project_root),
             "projectRootName": project_name,
-            "outputsDir": str(Path(__file__).parent / "outputs"),
-            "checkpoints": checkpoints,
+            "outputsDir": str(fail_outputs_dir),
+            "checkpoints": checkpoints
         }
+        if os.getenv("KEEP_LOCAL", "0") != "1":
+            try:
+                _cleanup_local(job_id)
+            except Exception as e:
+                print(f"[cleanup] skip error: {e}")
+        return ret
+    
     app_dir = Path(__file__).parent
-    outputs_dir = app_dir / "outputs"
+    outputs_dir = app_dir / "outputs" / str(job_id)
+    env["JOB_ID"] = str(job_id)
 
     # 5) sonar_api.py (CE 완료 대기 + 이슈 수집)
     rc, out, err = _run(f'"{python_exec}" -X utf8 sonar_api.py', cwd=app_dir, env=env)
@@ -131,8 +211,9 @@ def run_security_pipeline(*,
     else:
         details = "보고서 산출물 미확인"
     checkpoints.append({"step": "sonar_api", "ok": str(api_ok).lower(), "details": details})
+
     if not api_ok:
-        return {
+        ret = {
             "status": f"FAIL_API({rc})",
             "exitCode": rc,
             "projectKey": pj_key,
@@ -141,6 +222,12 @@ def run_security_pipeline(*,
             "outputsDir": str(outputs_dir),
             "checkpoints": checkpoints,
         }
+        if os.getenv("KEEP_LOCAL", "0") != "1":
+            try:
+                _cleanup_local(job_id)
+            except Exception as e:
+                print(f"[cleanup] skip error: {e}")
+        return ret
 
     # 6) run_refactor.py (리포트/가이드 생성)
     rc, out, err = _run(f'"{python_exec}" run_refactor.py', cwd=app_dir, env=env)
@@ -151,9 +238,11 @@ def run_security_pipeline(*,
         md_count = len([p for p in reports_dir.glob("*.md")])
     checkpoints.append({"step": "run_refactor", "ok": str(ref_ok).lower(),
                         "details": f"md_count={md_count}, outputs_dir={reports_dir}"})
+    result_payload = _gather_security_result(outputs_dir)
+
 
     status = "SUCCESS" if ref_ok else f"FAIL_REFACTOR({rc})"
-    return {
+    ret = {
         "status": status,
         "exitCode": rc,
         "projectKey": pj_key,
@@ -161,5 +250,19 @@ def run_security_pipeline(*,
         "projectRootName": project_name,
         "outputsDir": str(outputs_dir),
         "checkpoints": checkpoints,
+
+        # 백엔드 업로드용 실데이터
+        "eventType": "SecurityFinished",
+        "userId": user_id,
+        "jobId": job_id,
+        "result": result_payload,
     }
+
+    # 성공/실패와 무관하게 로컬 정리 (디버깅 시 KEEP_LOCAL=1 로 보존)
+    if os.getenv("KEEP_LOCAL", "0") != "1":
+        try:
+            _cleanup_local(job_id)
+        except Exception as e:
+            print(f"[cleanup] skip error: {e}")
+    return ret
 
