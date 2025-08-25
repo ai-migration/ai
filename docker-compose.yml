@@ -1,6 +1,8 @@
 networks:
   kafka-net:
     external: true 
+  sonar-net:
+    external: true
 
 services:
   orchestrate:
@@ -8,15 +10,32 @@ services:
     container_name: orchestrate
     environment:
       KAFKA_SERVER: kafka:9092
-      OPENAI_API_KEY: 
-    networks: [kafka-net]
+    networks: 
+      - kafka-net
 
   translate:
     image: leeyumin/translate:v1
     container_name: translate
     environment:
       KAFKA_SERVER: kafka:9092
-      OPENAI_API_KEY: 
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
     volumes:
-      - "C:/Users/User/Desktop/dev/project/eGovCodeDB_0805:/vectordb/eGovCodeDB_0805"
-    networks: [kafka-net]
+      - "/vectordb/eGovCodeDB_0805:/vectordb/eGovCodeDB_0805"
+    networks: 
+      - kafka-net
+
+  # security:
+  #   image: leeyumin/security:v1
+  #   container_name: security
+  #   environment:
+  #     KAFKA_SERVER: kafka:9092
+  #     OPENAI_API_KEY: 
+  #     SONAR_URL: http://sonarqube:9000
+  #     SONAR_TOKEN:
+  #     CHROMA_QUERY_TIMEOUT: 8
+  #     RAG_FORCE_PEEK: 0
+  #   volumes:
+  #     - "C:/Users/User/Desktop/dev/project/eGovCodeDB_0805:/vectordb/eGovCodeDB_0805" ## 여기 수정
+  #   networks: 
+  #     - kafka-net
+  #     - sonar-net
