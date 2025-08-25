@@ -8,3 +8,5 @@ langchain_openai
 langchain_core 
 langchain-community
 pymupdf
+boto3
+requests

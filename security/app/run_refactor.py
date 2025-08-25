@@ -33,15 +33,19 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 
 # ---------------- paths & constants ----------------
+JOB_ID = os.getenv("JOB_ID", "").strip()
+
 BASE = Path(__file__).resolve().parent
 INDEX_DIR = BASE / "index"
 TEXT_STORE_DIR = INDEX_DIR / "faiss_text_lc"
 CODE_STORE_DIR = INDEX_DIR / "faiss_code_lc"
-OUT_DIR = BASE / "outputs"
+OUT_DIR = BASE / "outputs" / (JOB_ID if JOB_ID else "")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
-AGENT_INPUTS = OUT_DIR / "agent_inputs.json"
+
 REPORT_DIR = OUT_DIR / "security_reports"
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
+AGENT_INPUTS = REPORT_DIR / "agent_inputs.json"
+
 
 TEXT_EMBED_MODEL = os.getenv("TEXT_EMBED_MODEL", "intfloat/multilingual-e5-large")
 CODE_EMBED_MODEL = os.getenv("CODE_EMBED_MODEL", "text-embedding-3-large")
@@ -332,12 +336,18 @@ def main():
     load_vectorstores()
 
     # load issues
-    issues = json.loads(AGENT_INPUTS.read_text(encoding="utf-8"))
+    ai_path = AGENT_INPUTS if AGENT_INPUTS.exists() else (OUT_DIR / "agent_inputs.json")
+    if not ai_path.exists():
+        raise FileNotFoundError(
+            f"agent_inputs.json not found in {AGENT_INPUTS} nor {OUT_DIR / 'agent_inputs.json'}"
+        )
+    issues = json.loads(ai_path.read_text(encoding="utf-8"))
     assert isinstance(issues, list)
 
     graph = build_graph()
 
-    report: List[Dict[str, Any]] = []
+    # report: List[Dict[str, Any]] = []
+
     for i, issue in enumerate(issues[:5], 1):
         state: State = {
             "issue": issue,
@@ -363,19 +373,24 @@ def main():
         out = graph.invoke(state, config=invoke_cfg)
 
 
-        report.append({
-            "issue_index": i,
-            "rule": issue.get("rule"),
-            "component": strip_md_link(issue.get("component","")),
-            "line": issue.get("line"),
-            "severity": issue.get("severity"),
-            "tags": issue.get("tags", []),
-            "search_query": issue.get("search_query"),
-            "guide_file": str((REPORT_DIR / make_filename(issue, i)).relative_to(BASE)),
-            "guide_title": out.get("guide_title", "보안 가이드"),
-        })
+        # report.append({
+        #     "issue_index": i,
+        #     "rule": issue.get("rule"),
+        #     "component": strip_md_link(issue.get("component","")),
+        #     "line": issue.get("line"),
+        #     "severity": issue.get("severity"),
+        #     "tags": issue.get("tags", []),
+        #     "search_query": issue.get("search_query"),
+        #     "guide_file": str((REPORT_DIR / make_filename(issue, i)).relative_to(BASE)),
+        #     "guide_title": out.get("guide_title", "보안 가이드"),
+        # })
 
-    (REPORT_DIR / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    # --- (3) 여기부터 새로 추가: 디렉터리에서 MD 파일명만 수집해서 저장 ---
+    md_files = sorted([p.name for p in REPORT_DIR.glob("*.md")])
+    payload = {"files": md_files, "count": len(md_files)}
+    (REPORT_DIR / "report.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     print("✅ 전체 리포트 저장:", REPORT_DIR / "report.json")
 
 if __name__ == "__main__":

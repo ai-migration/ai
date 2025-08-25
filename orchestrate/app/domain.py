@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 @dataclass
 class ToTranslator:
@@ -9,6 +10,12 @@ class ToTranslator:
     output_egov_frame_ver: str
     is_test_code: bool
     conversion_type: str
+
+@dataclass
+class ToSecurity:
+    job_id: int
+    user_id: int
+    filePath: str
 
 @dataclass
 class ToAuditor:

@@ -1,6 +1,6 @@
 from typing import TypedDict
 from orchestrate.app.producer import MessageProducer
-from orchestrate.app.domain import ToTranslator, ToAuditor
+from orchestrate.app.domain import ToTranslator, ToAuditor, ToSecurity
 from dataclasses import asdict
 
 producer = MessageProducer()
@@ -21,9 +21,9 @@ def call_agent(request):
                                                                         is_test_code=request['isTestCode'],
                                                                         conversion_type=request['conversionType'])))
     elif request['eventType'] == 'SecurityRequested':
-        producer.send_message('security', asdict(ToAuditor(
-                                                           user_id=request['userId'],
-                                                           job_id=request['jobId'])))
+        producer.send_message('security',message=asdict(ToSecurity(job_id=request['jobId'],
+                                                                   user_id=request['userId'],
+                                                                   filePath=request['filePath'])))
     elif request['eventType'] == 'ChatbotRequested':
         producer.send_message('chatbot', asdict(ToAuditor(id=request['id'])))
 

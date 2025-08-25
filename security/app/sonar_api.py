@@ -5,11 +5,18 @@ import time
 from pathlib import Path
 from collections import defaultdict
 from pprint import pprint
+import os
+import sys
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
 
 # ===== 설정 =====
-SONAR_URL = "http://localhost:9000"
-TOKEN = "sqa_d92dfa34bb6849d9dfc4dd9a212a52f32a0e273b"
-PROJECT_KEY = "test02"
+
+SONAR_URL = os.getenv("SONAR_URL", "http://localhost:9000")
+TOKEN = os.getenv("SONAR_TOKEN","sqa_d92dfa34bb6849d9dfc4dd9a212a52f32a0e273b")
+PROJECT_KEY = os.getenv("SONAR_PROJECT_KEY", "test02")
 AUTH = (TOKEN, '')  # 토큰 인증
 PAGE_SIZE = 500
 
@@ -172,7 +179,8 @@ def collect_and_write_agent_inputs(out_dir: str | Path):
 # ===== 메인 실행 =====
 if __name__ == "__main__":
     # 출력 폴더
-    out_dir = ensure_dir("outputs")
+    job_id = os.getenv("JOB_ID", "").strip()
+    out_dir = ensure_dir(Path("outputs") / (job_id if job_id else "") / "security_reports")
 
     print("📊 품질 게이트 상태:")
     qg = get_quality_gate_status()
