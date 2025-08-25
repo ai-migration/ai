@@ -4,8 +4,17 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from chatbot.app.agent import call_agent, RAG
 import os, re, shutil
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="AI Assistant API", version="0.2.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # 또는 특정 도메인 ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],   # 여기에 OPTIONS 포함
+    allow_headers=["*"],
+)
 
 # ---------- Chat ----------
 class User(BaseModel):
