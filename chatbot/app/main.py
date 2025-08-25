@@ -2,7 +2,7 @@
 from fastapi import FastAPI, Body, UploadFile, File, Query
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
-from app.agent import call_agent, RAG
+from chatbot.app.agent import call_agent, RAG
 import os, re, shutil
 
 app = FastAPI(title="AI Assistant API", version="0.2.0")
