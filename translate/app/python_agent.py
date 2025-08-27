@@ -367,7 +367,7 @@ def save_to_egov_tree_node(state: dict) -> dict:
         os.makedirs(path, exist_ok=True)
 
     # 1) 출력 루트 결정
-    outdir = state.get("outdir", "egov_generated_project")
+    outputs_dir = state.get("outdir", "output")
 
     # 2) 역할별 디렉터리 매핑 (4분류 고정)
     mapping = {
@@ -391,7 +391,7 @@ def save_to_egov_tree_node(state: dict) -> dict:
             continue
 
         subdir = mapping[role]
-        target_dir = os.path.join(outdir, subdir)
+        target_dir = os.path.join(outputs_dir, subdir)
         _ensure_dir(target_dir)
 
         for idx, code in enumerate(code_list):
@@ -406,21 +406,19 @@ def save_to_egov_tree_node(state: dict) -> dict:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(cleaned_code)
 
-    # 5) ZIP으로 묶어 outputs/에 저장
-    outputs_dir = state.get("outputs_dir", "output")
+    # 5) ZIP으로 묶어 output/에 저장
     os.makedirs(outputs_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    zip_path = os.path.join(outputs_dir, f"egov_generated_project.zip")
-    root_no_ext, _ = os.path.splitext(zip_path)
-    shutil.make_archive(root_no_ext, "zip", outdir)
-
+    zip_base = os.path.join(outputs_dir, "egovframework")
+    # egovframework 폴더를 zip으로 압축
+    shutil.make_archive(zip_base, "zip", root_dir=outputs_dir, base_dir="egovframework")
 
     return state
 
 
 def reanalyze_generated_java_node(state: dict) -> dict:
     import tempfile, os
-    input_path = r"C:\Users\rngus\ai-migration\ai\output\egov_generated_project.zip"
+    input_path = r"output/egovframework.zip"
     print(input_path)
     if not input_path or not os.path.exists(input_path):
         print("⚠️ ZIP 경로가 없습니다.")

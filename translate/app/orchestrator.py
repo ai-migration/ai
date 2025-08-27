@@ -85,7 +85,7 @@ def java_to_egov(user_id, job_id) -> Dict[str, Any]:
         egov_agent = ConversionEgovAgent()
         graph = egov_agent.build_graph()
         state = egov_agent.init_state(user_id, job_id)
-        final_state = graph.invoke(state)
+        final_state = graph.invoke(state, config={"recursion_limit": 1000})
         
         # with open("output/conversion_result.json", 'w', encoding='utf-8') as f:
         #     json.dump(final_state, f, ensure_ascii=False, indent=2)
@@ -93,6 +93,9 @@ def java_to_egov(user_id, job_id) -> Dict[str, Any]:
         status = 'SUCCESS'
         description = '전자정부표준프레임워크 변환 완료되었습니다.'
         result = final_state
+        if os.path.exists('output'):
+            shutil.rmtree('output')
+            print(f"중간 산출물을 삭제했습니다.")
     except Exception as e:
         print(e)
         status = 'FAIL'
@@ -123,7 +126,7 @@ class ConversionAgent:
         self.executor = AgentExecutor(agent=self.agent, tools=self.tools, verbose=True)
         
     def run(self, user_id, job_id, input_path):
-        outdir = f"{user_id}/{job_id}/conversed/"
+        outdir = f"output/"
         with tempfile.TemporaryDirectory() as tmp:
             download_dir = os.path.join(tmp, "downloads")   # ZIP 저장
             extract_dir  = os.path.join(tmp, "extracted")   # 압축 풀 위치(이것만 삭제)
@@ -162,4 +165,4 @@ class ConversionAgent:
 if __name__ == "__main__":  
     # r = run_analysis(1, 1, r"C:\Users\User\Desktop\dev\project\0811test.zip", './res')
     conv_agent = ConversionAgent()
-    conv_agent.run(1, 1, r"C:\Users\rngus\ai-migration\ai\test\javatest.zip")
+    conv_agent.run(1, 1, r"C:\Users\User\Downloads\python_project.zip")
