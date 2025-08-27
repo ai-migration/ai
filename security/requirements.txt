@@ -18,3 +18,4 @@ python-dotenv==1.0.1
 numpy>=1.26,<3
 confluent_kafka
 sentence-transformers==5.1.0
+faiss-cpu
