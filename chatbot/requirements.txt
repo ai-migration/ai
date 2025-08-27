@@ -8,3 +8,5 @@ langchain_openai
 langchain_core 
 langchain-community
 python-multipart
+faiss-cpu
+pypdf
