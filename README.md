@@ -1,20 +1,32 @@
-0814 기준 테스트 방식 및 로직
+# AI
 
-api를 사용하려면 http://localhost:8084/agents/conversion 사용 -> 자세한 방식은 노션에 있음
+> Python/Java 기반의 코드를 **전자정부표준프레임워크(eGovFramework)** 스타일로 변환하고,  
+> **보안/품질 분석까지 자동화**하는 **멀티 에이전트** 시스템
 
-- API로 테스트하는 방법
-    http://localhost:8084/agents/conversion 사용 -> 자세한 방법은 노션에 있음
-- 명령어로 실행하는 방법
-    1. ai\orchestrate\app\main.py 실행
-        - 에이전트 실행 끝난 후 완료 메세지를 받기 위함
-    2. ~/ai 경로에서 ```python -m translate.app.orchestrator``` 실행
+---
 
-- 실행 결과
-    - 명령어를 실행한 경로에 output 폴더가 생성됨
-        생성되는 파일: java_analysis_results.json (언어가 자바인 경우)
-                    conversion_result.json
+## ✨ 주요 기능
+- **Orchestrate**: API를 통해 각 에이전트를 실행하고 응답
+- **Translate**: Python/Java → eGov(Controller/Service/VO 등) 변환 및 생성을 수행하고  리포트를 생성하는 에이전트
+- **Upgrade/Downgrade**: eGov 버전 컨트롤 에이전트
+- **Security**: 보안 취약점 분석과 보안 가이드를 생성하는 에이전트
+- **Chatbot**: 서비스 이용 도우미 역할의 챗봇 에이전트
 
-### 추후 작업 사항
-- 백엔드에서 output 경로 받아서 S3에 저장하고 output 폴더 삭제
-- 맨 처음 경로 입력 시 S3에 있는 zip의 경로를 넘겨주고 그 경로에서 파일 읽기 (분석 에이전트에서)
-- 리포트 자세하게
+---
+## ⚙️ 기술 스택
+| 영역 | 기술 |
+|------|------|
+| Language | <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=Python&logoColor=white"/> |
+| Agent | <img src="https://img.shields.io/badge/LangGraph-1C3C3C?style=flat-square&logo=langgraph&logoColor=white"/>, <img src="https://img.shields.io/badge/crewai-FF5A50?style=flat-square&logo=crewai&logoColor=white"/> |
+| LLM | <img src="https://img.shields.io/badge/huggingface-FFD21E?style=flat-square&logo=huggingface&logoColor=black"/>, <img src="https://img.shields.io/badge/openai-412991?style=flat-square&logo=openai&logoColor=white"/> |
+| Event Streaming | <img src="https://img.shields.io/badge/kafka-231F20?style=flat-square&logo=apachekafka&logoColor=white"/> |
+| Backend | <img src="https://img.shields.io/badge/fastapi-009688?style=flat-square&logo=fastapi&logoColor=white"/> |
+| 기타 | AST, SonarQube |
+---
+
+## 🧱 아키텍처
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/d4b62eec-ce92-4028-9516-92d6b3ea30a4" alt="ai 아키텍처" width="70%">
+</p>
+
