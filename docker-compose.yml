@@ -6,7 +6,7 @@ networks:
 
 services:
   orchestrate:
-    image: leeyumin/orchestrate:v2
+    image: leeyumin/orchestrate:v250826
     container_name: orchestrate
     environment:
       KAFKA_SERVER: kafka:9092
@@ -14,7 +14,7 @@ services:
       - kafka-net
 
   translate:
-    image: leeyumin/translate:v1
+    image: leeyumin/translate:v250826.c
     container_name: translate
     environment:
       KAFKA_SERVER: kafka:9092
@@ -26,7 +26,7 @@ services:
       - kafka-net
 
   chatbot:
-    image: leeyumin/chatbot:v2
+    image: leeyumin/chatbot:v250826.a
     container_name: chatbot
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
@@ -34,7 +34,7 @@ services:
       - 8000:8000
 
   security:
-    image: leeyumin/security:v8
+    image: leeyumin/security:v250826
     container_name: security
     environment:
       KAFKA_SERVER: kafka:9092
